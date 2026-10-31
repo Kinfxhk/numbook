@@ -146,11 +146,20 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _negName = prefs.getString('tallynote.negColour') ?? '';
     final splitOn = prefs.getBool('tallynote.split') ?? false;
     final splitSheet = prefs.getString('tallynote.splitSheet') ?? '';
+    final splitFirst = prefs.getString('tallynote.splitPrimary') ?? '';
 
     await _store.load();
     _store.addListener(_onStore);
-    _paneA.load(_store.activeId!);
+    // the left pane keeps its own sheet, so a restart does not swap the sides
+    final first =
+        splitOn &&
+            splitFirst != splitSheet &&
+            _store.sheets.any((s) => s.id == splitFirst)
+        ? splitFirst
+        : _store.activeId!;
+    _paneA.load(first);
     if (splitOn) _restoreSplit(splitSheet);
+    _focusB = _paneB != null && _store.activeId == _paneB!.sheetId;
     await Rates.load(allowNetwork: _autoRates);
     for (final p in _livePanes) {
       p.rebuildEngine();
@@ -161,7 +170,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   /// The first pane shows the active sheet, the second the stored one.
   void _restoreSplit(String stored) {
-    final active = _store.activeId;
+    final active = _paneA.sheetId;
     if (_store.sheets.length < 2) return;
     final known =
         stored.isNotEmpty &&
@@ -193,7 +202,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
         ids.firstWhere((id) => id != not, orElse: () => '');
 
     final b = _paneB;
-    if (b != null && (!ids.contains(b.sheetId) || b.sheetId == _paneA.sheetId)) {
+    if (b != null &&
+        (!ids.contains(b.sheetId) || b.sheetId == _paneA.sheetId)) {
       final take = other(_paneA.sheetId);
       if (take.isEmpty) {
         _closeSplit();
@@ -275,6 +285,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   void _closeSplit() {
     final b = _paneB;
     if (b == null) return;
+    // the right pane's pending debounce must land before the left pane reads it
+    b.flush();
     final active = _store.activeId;
     setState(() {
       _paneB = null;
@@ -480,6 +492,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setString('tallynote.negColour', _negName);
     await prefs.setBool('tallynote.split', _split);
     await prefs.setString('tallynote.splitSheet', _paneB?.sheetId ?? '');
+    await prefs.setString(
+      'tallynote.splitPrimary',
+      _paneB == null ? '' : _paneA.sheetId,
+    );
   }
 
   String get _effectiveLocale {
@@ -508,8 +524,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   void _format(String open, String close) => _focused.format(open, close);
 
-  /// Split off: today's single editor. Split on: the two panes side by side,
-  /// or stacked when the window is narrower than 1000.
+  /// Split off: today's single editor. Split on: the two panes side by side
+  /// when each one still gets the 340px a pane needs, stacked when it does not
+  /// (a phone, or a window narrower than a tablet).
   Widget _panesView() {
     final b = _paneB;
     if (b == null) {
@@ -522,7 +539,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       showTitle: true,
       onUnsplit: _closeSplit,
     );
-    if (MediaQuery.sizeOf(context).width < 1000) {
+    final w = MediaQuery.sizeOf(context).width;
+    final each = (w - 1) / 2; // one pane's own width, less the divider
+    final side = w >= 1000 || (w >= 700 && each >= 340);
+    if (!side) {
       return Column(
         key: const ValueKey('split-column'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
