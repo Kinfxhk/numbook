@@ -15,11 +15,9 @@ import 'data/document.dart';
 import 'data/rates.dart';
 import 'engine/engine.dart';
 import 'engine/values.dart';
-import 'ui/editor_view.dart';
+import 'ui/editor_pane.dart';
 import 'ui/feedback.dart';
-import 'ui/folding.dart';
 import 'ui/formatting.dart';
-import 'ui/marked_controller.dart';
 import 'ui/settings_sheet.dart';
 import 'ui/sidebar.dart';
 import 'ui/theme.dart';
@@ -38,17 +36,26 @@ class TallynoteApp extends StatefulWidget {
 
 class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   final _store = DocumentStore();
-  final _controller = MarkedController(dark: false);
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _navKey = GlobalKey<NavigatorState>();
 
-  late SheetEngine _engine;
-  List<LineResult> _results = [];
+  late PaneState _paneA;
+
+  /// Non-null while the split is on: the second editor.
+  PaneState? _paneB;
+  bool _focusB = false;
+
+  /// Set while the app itself adds the split's second sheet: that store
+  /// notification must not move the new sheet into the first pane too.
+  bool _routingOwn = false;
+
   bool _dark = false;
   bool _sidebarOpen = true;
   bool _answersVisible = true;
   bool _autoRates = true;
   bool _steps = true;
+
+  /// The stored default answer width; each pane keeps its own once dragged.
   double _answerW = 212;
   double _uiScale = 1.0;
   String? _locale; // null = follow the system
@@ -61,10 +68,15 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   final ValueNotifier<bool> _zoomModifier = ValueNotifier(false);
   bool _zoomHud = false;
   bool _savedFlash = false;
-  DateTime? _lastSaved;
-  bool _dirty = false;
   final FocusNode _searchFocus = FocusNode();
   Timer? _zoomHudTimer;
+
+  bool get _split => _paneB != null;
+
+  /// The pane that takes a sidebar click, a new sheet and the shortcuts.
+  PaneState get _focused => (_focusB && _paneB != null) ? _paneB! : _paneA;
+
+  List<PaneState> get _livePanes => [_paneA, ?_paneB];
 
   bool _onKey(KeyEvent e) {
     final down =
@@ -83,25 +95,33 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     });
   }
 
-  /// non-null while a section is folded: the full document, set aside
-  List<String>? _foldSource;
-  Set<int> _foldedLines = {};
-  List<int> _lineMap = const [];
   bool _signColours = true;
   String _posName = ''; // empty = the built-in paper-and-ink colours
   String _negName = '';
-  bool _syncing = false;
-  Timer? _saveTimer;
-  String? _boundSheetId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onKey);
-    _engine = _makeEngine();
-    _controller.addListener(_onText);
+    _paneA = _newPane('');
     unawaited(_boot());
+  }
+
+  PaneState _newPane(String sheetId) {
+    final pane = PaneState(
+      store: _store,
+      sheetId: sheetId,
+      makeEngine: _makeEngine,
+      answerW: _answerW,
+    )..addListener(_onPane);
+    // an empty id means "not bound yet": _boot loads the active sheet into it
+    pane.load(sheetId);
+    return pane;
+  }
+
+  void _onPane() {
+    if (mounted) setState(() {});
   }
 
   SheetEngine _makeEngine() => SheetEngine(
@@ -124,16 +144,33 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _signColours = prefs.getBool('tallynote.signColours') ?? true;
     _posName = prefs.getString('tallynote.posColour') ?? '';
     _negName = prefs.getString('tallynote.negColour') ?? '';
+    final splitOn = prefs.getBool('tallynote.split') ?? false;
+    final splitSheet = prefs.getString('tallynote.splitSheet') ?? '';
 
     await _store.load();
     _store.addListener(_onStore);
-    _bindSheet();
+    _paneA.load(_store.activeId!);
+    if (splitOn) _restoreSplit(splitSheet);
     await Rates.load(allowNetwork: _autoRates);
+    for (final p in _livePanes) {
+      p.rebuildEngine();
+    }
     if (!mounted) return;
-    setState(() {
-      _engine = _makeEngine();
-      _recalc();
-    });
+    setState(() {});
+  }
+
+  /// The first pane shows the active sheet, the second the stored one.
+  void _restoreSplit(String stored) {
+    final active = _store.activeId;
+    if (_store.sheets.length < 2) return;
+    final known =
+        stored.isNotEmpty &&
+        stored != active &&
+        _store.sheets.any((s) => s.id == stored);
+    final second = known
+        ? stored
+        : _store.sheets.firstWhere((s) => s.id != active).id;
+    _paneB = _newPane(second);
   }
 
   void _onStore() {
@@ -141,9 +178,114 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     final id = _store.activeId;
     if (id != null && !_tabs.contains(id)) _tabs.add(id);
     if (_tabs.length > 8) _tabs.removeAt(0);
-    if (_store.activeId != _boundSheetId) _bindSheet();
+    _syncPanes();
     // a rename, pin or folder move changes nothing else, so refresh the tree
     setState(() {});
+  }
+
+  /// Keep one pane per sheet: a pane that lost its sheet falls back to another
+  /// one (the split closes when there is none), and the focused pane follows
+  /// whichever sheet the store was asked to open.
+  void _syncPanes() {
+    if (_routingOwn) return;
+    final ids = _store.sheets.map((s) => s.id).toSet();
+    String other(String not) =>
+        ids.firstWhere((id) => id != not, orElse: () => '');
+
+    final b = _paneB;
+    if (b != null && (!ids.contains(b.sheetId) || b.sheetId == _paneA.sheetId)) {
+      final take = other(_paneA.sheetId);
+      if (take.isEmpty) {
+        _closeSplit();
+      } else {
+        b.load(take);
+      }
+    }
+    if (!ids.contains(_paneA.sheetId)) {
+      final active = _store.activeId ?? '';
+      final take = ids.contains(active) && active != _paneB?.sheetId
+          ? active
+          : other(_paneB?.sheetId ?? '');
+      if (take.isEmpty) {
+        // the other pane holds the only sheet left: no split is possible
+        _closeSplit();
+        return;
+      }
+      _paneA.load(take);
+    }
+
+    final id = _store.activeId;
+    if (id == null || id == _focused.sheetId) return;
+    if (_paneB != null && id == _paneB!.sheetId) {
+      _focusB = true;
+    } else if (_paneB != null && id == _paneA.sheetId) {
+      _focusB = false;
+    } else {
+      _focused.load(id);
+    }
+  }
+
+  /// A sidebar click, a tab or a pane menu: open [id] in the focused pane.
+  void _activate(String id) {
+    final b = _paneB;
+    if (b != null && id == b.sheetId) {
+      // already in the other pane: move the focus instead of showing it twice
+      setState(() => _focusB = true);
+    } else {
+      if (b != null && id == _paneA.sheetId) setState(() => _focusB = false);
+      _focused.load(id);
+    }
+    _store.select(id);
+    if (_split) _saveSettings();
+  }
+
+  void _focusPane(PaneState p) {
+    if (_paneB == null) return;
+    final moved = _focusB != (p == _paneB);
+    final reselect = _store.activeId != p.sheetId;
+    if (!moved && !reselect) return;
+    setState(() => _focusB = p == _paneB);
+    if (reselect) _store.select(p.sheetId);
+    _saveSettings();
+  }
+
+  void _toggleSplit() {
+    if (_split) {
+      _closeSplit();
+      return;
+    }
+    final other = _store.sheets
+        .where((s) => s.id != _paneA.sheetId)
+        .firstOrNull;
+    if (other != null) {
+      setState(() => _paneB = _newPane(other.id));
+    } else {
+      // one sheet: the split gets a blank one of its own, and the cursor with it
+      _routingOwn = true;
+      final s = _store.create();
+      _routingOwn = false;
+      setState(() {
+        _paneB = _newPane(s.id);
+        _focusB = true;
+      });
+    }
+    _saveSettings();
+  }
+
+  void _closeSplit() {
+    final b = _paneB;
+    if (b == null) return;
+    final active = _store.activeId;
+    setState(() {
+      _paneB = null;
+      _focusB = false;
+    });
+    // the pane leaves this frame first: its controller may only die after
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!b.disposed) b.dispose();
+    });
+    if (active != null && active != _paneA.sheetId) _paneA.load(active);
+    _saveSettings();
   }
 
   void _closeTab(String id) {
@@ -166,119 +308,18 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _saveSettings();
   }
 
-  Set<int> get _foldable {
-    final src = _foldSource ?? _controller.text.split('\n');
-    return {
-      for (var i = 0; i < src.length; i++)
-        if (isHeading(src[i])) i,
-    };
-  }
-
-  /// Fold or unfold the section that starts at [original].
-  /// Folding swaps the visible text for a projection, so the editor is
-  /// read-only until the section is opened again — nothing can be lost.
-  void _toggleFold(int original) {
-    final source = _foldSource ?? _controller.text.split('\n');
-    final folded = Set<int>.from(_foldedLines);
-    if (!folded.remove(original)) folded.add(original);
-
-    if (folded.isEmpty) {
-      _controller.text = source.join('\n');
-      _foldSource = null;
-      _foldedLines = {};
-      _lineMap = List<int>.generate(source.length, (i) => i);
-      _recalc();
-      return;
-    }
-
-    final result = foldDocument(source, folded);
-    _foldSource = source;
-    _foldedLines = folded;
-    _lineMap = result.map;
-    _controller.text = result.visibleLines.join('\n');
-    _recalc();
-  }
-
-  void _bindSheet() {
-    final sheet = _store.active;
-    if (sheet == null) return;
-    // do not let a pending debounce land in the sheet we are opening
-    if (_boundSheetId != sheet.id) _flush();
-    _boundSheetId = sheet.id;
-    _syncing = true;
-    _foldSource = null;
-    _foldedLines = {};
-    _lineMap = const [];
-    _controller.text = sheet.content;
-    _syncing = false;
-    _recalc();
-  }
-
-  /// What the sheet actually contains: while a section is folded the editor
-  /// shows a projection, so the saved text must come from the full source.
-  String get _contentToSave => _foldSource?.join('\n') ?? _controller.text;
-
-  /// Write a pending debounce now, into the sheet it was typed in: a kill, a
-  /// hidden window or a sheet switch would otherwise drop it.
-  void _flush() {
-    if (!(_saveTimer?.isActive ?? false)) return;
-    _saveTimer!.cancel();
-    final id = _boundSheetId ?? _store.activeId;
-    if (id != null) _persist(id, _contentToSave);
-    _dirty = false;
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // paused/detached may be the last callback before the process goes away
     if (state != AppLifecycleState.resumed) _flush();
   }
 
-  void _persist(String id, String content) {
-    final firstLine = content
-        .split('\n')
-        .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
-        .replaceAll(RegExp(r'^#\s*'), '')
-        .trim();
-    final sheet = _store.sheets.where((x) => x.id == id).firstOrNull;
-    _store.update(
-      id,
-      content: content,
-      title: sheet?.customTitle == true
-          ? null
-          : (firstLine.length > 34 ? firstLine.substring(0, 34) : firstLine),
-    );
-  }
-
-  void _onText() {
-    _recalc();
-    if (_syncing) return;
-    final id = _store.activeId;
-    if (id == null) return;
-    if (!_dirty) setState(() => _dirty = true);
-    _saveTimer?.cancel();
-    final content = _contentToSave;
-    _saveTimer = Timer(const Duration(milliseconds: 400), () {
-      _persist(id, content);
-      if (mounted) {
-        setState(() {
-          _dirty = false;
-          _lastSaved = DateTime.now();
-        });
-      }
-    });
-  }
-
-  /// Dropping an answer appends a live reference; the engine keeps it fresh.
-  void _insertReference(int line, String token) {
-    final base = _controller.text;
-    final sep = base.isEmpty || base.endsWith('\n') ? '' : '\n';
-    final ref = token;
-    final text = '$base$sep$ref';
-    _controller.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
+  /// Write every pending debounce now: a kill, a hidden window or a sheet
+  /// switch would otherwise drop it.
+  void _flush() {
+    for (final p in _livePanes) {
+      p.flush();
+    }
   }
 
   Future<void> _fileMenu() async {
@@ -389,14 +430,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   /// Ctrl/Cmd+S: write now instead of waiting for the debounce.
   void _saveNow() {
-    _saveTimer?.cancel();
-    final id = _store.activeId;
-    if (id != null) _persist(id, _contentToSave);
-    setState(() {
-      _lastSaved = DateTime.now();
-      _dirty = false;
-      _savedFlash = true;
-    });
+    for (final p in _livePanes) {
+      p.saveNow();
+    }
+    setState(() => _savedFlash = true);
     Timer(const Duration(milliseconds: 1200), () {
       if (mounted) setState(() => _savedFlash = false);
     });
@@ -409,25 +446,17 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     );
   }
 
-  void _recalc() {
-    // markers are presentation only: the engine sees plain arithmetic
-    final lines = _controller.text
-        .split('\n')
-        .map(Fmt.stripMarkers)
-        .toList(growable: false);
-    _results = _engine.evaluate(lines);
-    if (mounted) setState(() {});
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
     // last chance: a pending debounce must land before the frame goes away
     _store.removeListener(_onStore);
-    _flush();
+    for (final p in _livePanes) {
+      p.dispose();
+    }
     _zoomModifier.dispose();
-    _controller.dispose();
+    _searchFocus.dispose();
     _store.dispose();
     super.dispose();
   }
@@ -449,6 +478,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setBool('tallynote.signColours', _signColours);
     await prefs.setString('tallynote.posColour', _posName);
     await prefs.setString('tallynote.negColour', _negName);
+    await prefs.setBool('tallynote.split', _split);
+    await prefs.setString('tallynote.splitSheet', _paneB?.sheetId ?? '');
   }
 
   String get _effectiveLocale {
@@ -475,28 +506,78 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _ => const Locale('en'),
   };
 
-  bool get _hasSelection =>
-      _controller.selection.isValid && !_controller.selection.isCollapsed;
+  void _format(String open, String close) => _focused.format(open, close);
 
-  void _format(String open, String close) {
-    final sel = _controller.selection;
-    if (!_hasSelection) return;
-    final (text, selection) = Fmt.wrap(_controller.text, sel, open, close);
-    _controller.value = TextEditingValue(text: text, selection: selection);
+  /// Split off: today's single editor. Split on: the two panes side by side,
+  /// or stacked when the window is narrower than 1000.
+  Widget _panesView() {
+    final b = _paneB;
+    if (b == null) {
+      return _pane(_paneA, focused: true, showTitle: false);
+    }
+    final top = _pane(_paneA, focused: !_focusB, showTitle: true);
+    final bottom = _pane(
+      b,
+      focused: _focusB,
+      showTitle: true,
+      onUnsplit: _closeSplit,
+    );
+    if (MediaQuery.sizeOf(context).width < 1000) {
+      return Column(
+        key: const ValueKey('split-column'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: top),
+          Divider(height: 1, color: Palette.hairline(_dark)),
+          Expanded(child: bottom),
+        ],
+      );
+    }
+    return Row(
+      key: const ValueKey('split-row'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: top),
+        VerticalDivider(width: 1, color: Palette.hairline(_dark)),
+        Expanded(child: bottom),
+      ],
+    );
   }
+
+  Widget _pane(
+    PaneState p, {
+    required bool focused,
+    required bool showTitle,
+    VoidCallback? onUnsplit,
+  }) => EditorPane(
+    pane: p,
+    dark: _dark,
+    focused: focused,
+    showTitle: showTitle,
+    otherSheetId: (p == _paneA ? _paneB : _paneA)?.sheetId,
+    answersVisible: _answersVisible,
+    showSteps: _steps,
+    showLineNumbers: _lineNumbers,
+    signColours: _signColours,
+    positiveColour: _posName.isEmpty ? null : Fmt.colours[_posName],
+    negativeColour: _negName.isEmpty ? null : Fmt.colours[_negName],
+    wheelBlocked: _zoomModifier,
+    onUnsplit: onUnsplit,
+    onFocus: () => _focusPane(p),
+    onPickSheet: _activate,
+    onAnswerWidth: (w) {
+      _answerW = w;
+      _saveSettings();
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
-    _controller.dark = _dark;
-    // each line only sees the names defined above it
-    final labelsByLine = <Set<String>>[];
-    final seen = <String>{};
-    for (final r in _results) {
-      labelsByLine.add(Set.of(seen));
-      final label = r.display == null ? null : SheetEngine.labelOf(r.text);
-      if (label != null) seen.add(label);
+    for (final p in _livePanes) {
+      p.controller.dark = _dark;
+      // each line only sees the names defined above it
+      p.applyLabels();
     }
-    _controller.labelsByLine = labelsByLine;
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final theme = buildTheme(_dark);
 
@@ -652,6 +733,16 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           const SingleActivator(LogicalKeyboardKey.backslash, control: true):
               _toggleSidebar,
           const SingleActivator(
+            LogicalKeyboardKey.backslash,
+            meta: true,
+            shift: true,
+          ): _toggleSplit,
+          const SingleActivator(
+            LogicalKeyboardKey.backslash,
+            control: true,
+            shift: true,
+          ): _toggleSplit,
+          const SingleActivator(
             LogicalKeyboardKey.keyA,
             meta: true,
             shift: true,
@@ -690,6 +781,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                             dark: _dark,
                             sidebarOpen: _sidebarOpen && wide,
                             showMenu: !(wide && _sidebarOpen),
+                            split: _split,
+                            onSplit: _toggleSplit,
                             onMenu: wide
                                 ? _toggleSidebar
                                 : () => _scaffoldKey.currentState?.openDrawer(),
@@ -711,11 +804,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 _saveSettings();
                               },
                               onNumberPreset: (v) {
-                                setState(() {
-                                  _numberPreset = v;
-                                  _engine = _makeEngine();
-                                });
-                                _recalc();
+                                setState(() => _numberPreset = v);
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
                                 _saveSettings();
                               },
                               posName: _posName,
@@ -763,10 +855,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                               onRefreshRates: () async {
                                 final ok = await Rates.refresh();
                                 if (!mounted) return false;
-                                setState(() {
-                                  _engine = SheetEngine(rates: Rates.current);
-                                  _recalc();
-                                });
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
                                 return ok;
                               },
                             ),
@@ -791,37 +882,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                           Expanded(
                             child: Stack(
                               children: [
-                                Positioned.fill(
-                                  child: EditorView(
-                                    controller: _controller,
-                                    results: _results,
-                                    dark: _dark,
-                                    answersVisible: _answersVisible,
-                                    showSteps: _steps,
-                                    explain: _engine.explain,
-                                    answerWidth: _answerW,
-                                    scale: 1,
-                                    wheelBlocked: _zoomModifier,
-                                    showLineNumbers: _lineNumbers,
-                                    onInsertReference: _insertReference,
-                                    lineMap: _lineMap,
-                                    foldable: _foldable,
-                                    folded: _foldedLines,
-                                    onToggleFold: _toggleFold,
-                                    readOnly: _foldSource != null,
-                                    signColours: _signColours,
-                                    positiveColour: _posName.isEmpty
-                                        ? null
-                                        : Fmt.colours[_posName],
-                                    negativeColour: _negName.isEmpty
-                                        ? null
-                                        : Fmt.colours[_negName],
-                                    onAnswerWidth: (w) {
-                                      setState(() => _answerW = w);
-                                      _saveSettings();
-                                    },
-                                  ),
-                                ),
+                                Positioned.fill(child: _panesView()),
                                 if (_zoomHud)
                                   Positioned(
                                     right: 18,
@@ -834,7 +895,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                       onReset: () => _setScale(1.0),
                                     ),
                                   ),
-                                if (_hasSelection)
+                                if (_focused.hasSelection)
                                   Positioned(
                                     left: 0,
                                     right: 0,
@@ -846,72 +907,17 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                       ),
                                     ),
                                   ),
-                                if (_answersVisible)
-                                  Positioned(
-                                    top: 0,
-                                    bottom: 0,
-                                    right: _answerW + 24 - 5,
-                                    width: 10,
-                                    child: MouseRegion(
-                                      cursor: SystemMouseCursors.resizeColumn,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.translucent,
-                                        onHorizontalDragUpdate: (d) {
-                                          final widest = _results
-                                              .map(
-                                                (r) => r.display?.length ?? 0,
-                                              )
-                                              .fold<int>(
-                                                0,
-                                                (a, b) => a > b ? a : b,
-                                              );
-                                          final minW = (widest * 9.2 + 60)
-                                              .clamp(140.0, 520.0);
-                                          setState(
-                                            () => _answerW =
-                                                (_answerW - d.delta.dx).clamp(
-                                                  minW,
-                                                  520.0,
-                                                ),
-                                          );
-                                        },
-                                        onHorizontalDragEnd: (_) =>
-                                            _saveSettings(),
-                                        onDoubleTap: () {
-                                          final widest = _results
-                                              .map(
-                                                (r) => r.display?.length ?? 0,
-                                              )
-                                              .fold<int>(
-                                                0,
-                                                (a, b) => a > b ? a : b,
-                                              );
-                                          setState(
-                                            () => _answerW = (widest * 9.2 + 44)
-                                                .clamp(140.0, 520.0),
-                                          );
-                                          _saveSettings();
-                                        },
-                                        child: Center(
-                                          child: Container(
-                                            width: 1,
-                                            color: Palette.hairline(_dark),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
                               ],
                             ),
                           ),
                           _StatusBar(
                             dark: _dark,
-                            dirty: _dirty,
+                            dirty: _focused.dirty,
                             justSaved: _savedFlash,
                             saveFailed: _store.saveFailed,
-                            savedAt: _lastSaved,
-                            lines: _controller.text.split('\n').length,
-                            answers: _results
+                            savedAt: _focused.lastSaved,
+                            lines: _focused.controller.text.split('\n').length,
+                            answers: _focused.results
                                 .where((r) => r.display != null)
                                 .length,
                           ),
@@ -936,7 +942,9 @@ class _Header extends StatelessWidget {
   /// The sidebar carries its own collapse control, so the header only shows a
   /// menu button when the sidebar is actually hidden.
   final bool showMenu;
+  final bool split;
   final VoidCallback onMenu;
+  final VoidCallback onSplit;
   final VoidCallback onFile;
   final VoidCallback onSettings;
 
@@ -944,7 +952,9 @@ class _Header extends StatelessWidget {
     required this.dark,
     required this.sidebarOpen,
     required this.showMenu,
+    required this.split,
     required this.onMenu,
+    required this.onSplit,
     required this.onFile,
     required this.onSettings,
   });
@@ -972,6 +982,13 @@ class _Header extends StatelessWidget {
               onTap: onFile,
             ),
             _IconAction(
+              icon: Icons.vertical_split,
+              tooltip: '${LocaleScope.t(context, 'split')}  ⌘⇧\\',
+              dark: dark,
+              active: split,
+              onTap: onSplit,
+            ),
+            _IconAction(
               icon: Icons.tune,
               tooltip: LocaleScope.t(context, 'settings'),
               dark: dark,
@@ -988,6 +1005,9 @@ class _IconAction extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final bool dark;
+
+  /// On while the thing it toggles is on.
+  final bool active;
   final VoidCallback onTap;
 
   const _IconAction({
@@ -995,6 +1015,7 @@ class _IconAction extends StatelessWidget {
     required this.tooltip,
     required this.dark,
     required this.onTap,
+    this.active = false,
   });
 
   @override
@@ -1003,7 +1024,7 @@ class _IconAction extends StatelessWidget {
       iconSize: 17,
       tooltip: tooltip,
       onPressed: onTap,
-      icon: Icon(icon, color: Palette.faint(dark)),
+      icon: Icon(icon, color: active ? Palette.fg(dark) : Palette.faint(dark)),
     );
   }
 }
