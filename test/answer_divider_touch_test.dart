@@ -36,9 +36,13 @@ TextSelection selection(WidgetTester tester) =>
     tester.widget<TextField>(editor()).controller!.selection;
 
 /// A phone is the only place the band is 44dp and the grip is drawn.
-Future<void> boot(WidgetTester tester, Size size) async {
+Future<void> boot(
+  WidgetTester tester,
+  Size size, {
+  Map<String, Object> prefs = const {},
+}) async {
   debugDefaultTargetPlatformOverride = TargetPlatform.android;
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues(prefs);
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -180,6 +184,24 @@ void main() {
     await tester.enterText(editor(), '2500');
     await tester.pump(const Duration(milliseconds: 400));
     expect(ruleX(tester), greaterThan(before));
+    await done(tester);
+  });
+
+  testWidgets('a hand-set width survives a restart, past the phone cap', (
+    tester,
+  ) async {
+    await boot(tester, const Size(390, 844), prefs: {
+      'tallynote.answerWidth': 180.0,
+      'tallynote.answerWidthSet': true,
+      'tallynote.sheets.v1':
+          '{"v":2,"folders":[],"sheets":[{"id":"a","title":"A",'
+          '"content":"2000+3000","pinned":false,"customTitle":true,'
+          '"updated":"2026-01-02T00:00:00.000"}]}',
+      'tallynote.active.v1': 'a',
+    });
+    await tester.pump(const Duration(milliseconds: 400));
+    // 390 - (180 + 12): the width the user dragged to, not the 134dp default
+    expect(ruleX(tester), closeTo(390 - 192, 1));
     await done(tester);
   });
 

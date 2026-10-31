@@ -35,9 +35,9 @@ class PaneState extends ChangeNotifier {
   bool dirty = false;
   DateTime? lastSaved;
 
-  /// True once the rule was dragged or auto-fitted here: the width is then the
+  /// True once the rule was dragged or auto-fitted: the width is then the
   /// user's, and may take room from the text (see editorMetrics).
-  bool explicitW = false;
+  bool explicitW;
 
   /// non-null while a section is folded: the full document, set aside
   List<String>? _foldSource;
@@ -54,6 +54,7 @@ class PaneState extends ChangeNotifier {
     required this.sheetId,
     required this.makeEngine,
     required this.answerW,
+    this.explicitW = false,
   }) {
     engine = makeEngine();
     controller.addListener(_onText);
@@ -196,6 +197,14 @@ class PaneState extends ChangeNotifier {
   void setAnswerWidth(double w) {
     answerW = w;
     explicitW = true;
+    _notify();
+  }
+
+  /// The stored width arrives after the pane exists: adopt it without
+  /// pretending it was just dragged.
+  void adoptWidth(double w, bool wasSet) {
+    answerW = w;
+    explicitW = wasSet;
     _notify();
   }
 
