@@ -56,12 +56,11 @@ jobs:
       # third of the size for the people who know which phone they have
       - run: flutter build apk --release
       - run: flutter build apk --release --split-per-abi
+      # one line per command: a shell continuation does not survive CRLF
       - name: Checksums
         run: |
           cd build/app/outputs/flutter-apk
-          sha256sum app-release.apk app-arm64-v8a-release.apk \r
-            app-armeabi-v7a-release.apk app-x86_64-release.apk \r
-            > SHA256SUMS.txt
+          sha256sum app-release.apk app-arm64-v8a-release.apk app-armeabi-v7a-release.apk app-x86_64-release.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -77,14 +76,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \r
-            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes ""
-          gh release upload "$GITHUB_REF_NAME" \r
-            build/app/outputs/flutter-apk/app-release.apk \r
-            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \r
-            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \r
-            build/app/outputs/flutter-apk/app-x86_64-release.apk \r
-            build/app/outputs/flutter-apk/SHA256SUMS.txt --clobber
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/app-x86_64-release.apk build/app/outputs/flutter-apk/SHA256SUMS.txt --clobber
 
   linux:
     needs: test
