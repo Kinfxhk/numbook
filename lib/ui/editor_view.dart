@@ -80,6 +80,10 @@ class EditorView extends StatefulWidget {
   final bool signColours;
   final void Function(int line, String token)? onInsertReference;
 
+  /// The double-tap path: a reference goes in at the caret, not at the end.
+  final void Function(int line, String token)? onInsertReferenceAtCaret;
+  final VoidCallback? onFoldAll;
+
   /// visible index -> original line index (-1 for a fold summary line)
   final List<int> lineMap;
   final Set<int> foldable;
@@ -114,6 +118,8 @@ class EditorView extends StatefulWidget {
     this.onAnswerWidth,
     this.signColours = true,
     this.onInsertReference,
+    this.onInsertReferenceAtCaret,
+    this.onFoldAll,
     this.lineMap = const [],
     this.foldable = const {},
     this.folded = const {},
@@ -251,23 +257,30 @@ class _EditorViewState extends State<EditorView> {
                       top: (tops.length > i ? tops[i] : 0) + 6,
                       left: 0,
                       width: gutterW - 10,
-                      child: Row(
-                        children: [
-                          SizedBox(width: 14, child: _foldArrow(i)),
-                          Expanded(
-                            child: Text(
-                              '${i + 1}',
-                              key: ValueKey('gutter-${i + 1}'),
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontFamily: monoFamily,
-                                fontSize: 11,
-                                color: Palette.faint(widget.dark)
-                                    .withValues(alpha: 0.55),
+                      // tap picks the whole line, a long press folds it —
+                      // the same verb as the chevron, on the number
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _selectLine(i),
+                        onLongPress: () => _foldLine(i),
+                        child: Row(
+                          children: [
+                            SizedBox(width: 14, child: _foldArrow(i)),
+                            Expanded(
+                              child: Text(
+                                '${i + 1}',
+                                key: ValueKey('gutter-${i + 1}'),
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontFamily: monoFamily,
+                                  fontSize: 11,
+                                  color: Palette.faint(widget.dark)
+                                      .withValues(alpha: 0.55),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                 Padding(
@@ -357,22 +370,62 @@ class _EditorViewState extends State<EditorView> {
       RegExp(r'[+\-*/^%×÷＋－＊／％]|乘|除|加|減|减').allMatches(line).length >= 2;
 
   Widget _foldArrow(int visibleIndex) {
-    final original = visibleIndex < widget.lineMap.length
-        ? widget.lineMap[visibleIndex]
-        : visibleIndex;
+    final original = _originalFor(visibleIndex);
     if (widget.onToggleFold == null || !widget.foldable.contains(original)) {
       return const SizedBox.shrink();
     }
     final isFolded = widget.folded.contains(original);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => widget.onToggleFold!(original),
+      onTap: () {
+        tapFeedback();
+        widget.onToggleFold!(original);
+      },
+      // one gesture for the whole document, toggling both ways
+      onLongPress: widget.onFoldAll == null
+          ? null
+          : () {
+              tapFeedback(light: true);
+              widget.onFoldAll!();
+            },
       child: Icon(
         isFolded ? Icons.keyboard_arrow_right : Icons.keyboard_arrow_down,
         size: 14,
         color: Palette.faint(widget.dark).withValues(alpha: 0.8),
       ),
     );
+  }
+
+  int _originalFor(int visibleIndex) =>
+      visibleIndex < widget.lineMap.length
+      ? widget.lineMap[visibleIndex]
+      : visibleIndex;
+
+  void _foldLine(int visibleIndex) {
+    final original = _originalFor(visibleIndex);
+    if (widget.onToggleFold == null || !widget.foldable.contains(original)) {
+      return;
+    }
+    tapFeedback();
+    widget.onToggleFold!(original);
+  }
+
+  /// The gutter's tap: the whole logical line the number sits beside.
+  void _selectLine(int visibleIndex) {
+    final text = widget.controller.text;
+    var start = 0;
+    for (var i = 0; i < visibleIndex; i++) {
+      final nl = text.indexOf('\n', start);
+      if (nl < 0) return;
+      start = nl + 1;
+    }
+    final nl = text.indexOf('\n', start);
+    widget.controller.selection = TextSelection(
+      baseOffset: start,
+      extentOffset: nl < 0 ? text.length : nl,
+    );
+    _focus.requestFocus();
+    tapFeedback();
   }
 
   /// One answer cell, with drag-to-reference when the sheet supports it.
@@ -393,6 +446,7 @@ class _EditorViewState extends State<EditorView> {
       );
     }
     final cell = _answerGestures(
+      index: i,
       line: r.text,
       display: r.display!,
       canExplain:
@@ -469,8 +523,11 @@ class _EditorViewState extends State<EditorView> {
 
   /// Tap expands the steps; a long press (or a desktop right-click) copies
   /// the number, which is the thing people actually want off a phone.
+  /// A double tap drops a reference into the caret — the mouse's drag, for
+  /// a finger that cannot drag and type at once.
   /// The whole cell is the target — the chevron is a hint, not a 16px button.
   Widget _answerGestures({
+    required int index,
     required String line,
     required String display,
     required bool canExplain,
@@ -486,6 +543,12 @@ class _EditorViewState extends State<EditorView> {
           : null,
       onLongPress: () => _copy(display),
       onSecondaryTap: () => _copy(display),
+      onDoubleTap: widget.onInsertReferenceAtCaret == null
+          ? null
+          : () {
+              tapFeedback(light: true);
+              widget.onInsertReferenceAtCaret!(index + 1, _tokenFor(index));
+            },
       child: child,
     );
   }

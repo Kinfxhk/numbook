@@ -4,14 +4,23 @@ import 'package:flutter/services.dart';
 
 import 'theme.dart';
 
+/// Settings → haptics. On by default; a desktop has no vibrator, and the
+/// check below skips it anyway.
+class Haptics {
+  static bool on = true;
+}
+
 /// The app had no press feedback at all (NoSplash everywhere), which reads as
 /// "dead" on both desktop and phone. Everything tappable goes through here:
 /// a short haptic on mobile, a tint + hover on desktop, and a splash that is
 /// a whisper rather than a ripple.
-Future<void> tapFeedback() async {
+Future<void> tapFeedback({bool light = false}) async {
+  if (!Haptics.on) return;
   if (defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS) {
-    await HapticFeedback.selectionClick();
+    await (light
+        ? HapticFeedback.lightImpact()
+        : HapticFeedback.selectionClick());
   }
 }
 
@@ -77,16 +86,18 @@ class _PressableState extends State<Pressable> {
         onTapDown: (_) => _set(true),
         onTapUp: (_) => _set(false),
         onTapCancel: () => _set(false),
+        // the tick is fired, not awaited: a slow platform channel must never
+        // hold the tap itself
         onTap: widget.onTap == null
             ? null
-            : () async {
-                if (widget.haptic) await tapFeedback();
+            : () {
+                if (widget.haptic) tapFeedback();
                 widget.onTap!();
               },
         onLongPress: widget.onLongPress == null
             ? null
-            : () async {
-                if (widget.haptic) await tapFeedback();
+            : () {
+                if (widget.haptic) tapFeedback();
                 widget.onLongPress!();
               },
         child: box,

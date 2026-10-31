@@ -110,6 +110,13 @@ class T {
     'keyBarHint': 'A key row above the keyboard, whatever the IME',
     'copied': 'Copied',
     'editorHintShort': 'Type a calculation…   e.g. 2500*12',
+    'deleted': 'Sheet deleted',
+    'undo': 'Undo',
+    'followSystem': 'System',
+    'light': 'Light',
+    'themeHint': 'Follow the phone, or pick one',
+    'haptics': 'Haptics',
+    'hapticsHint': 'A tick on keys, folds and swipes',
   };
 
   static const _zhHant = <String, String>{
@@ -208,6 +215,13 @@ class T {
     'keyBarHint': '鍵盤上方一排按鍵，不受輸入法影響',
     'copied': '已複製',
     'editorHintShort': '輸入算式…   例如 2500*12',
+    'deleted': '已刪除記事',
+    'undo': '復原',
+    'followSystem': '跟隨系統',
+    'light': '淺色',
+    'themeHint': '跟隨手機，或自己揀',
+    'haptics': '觸感震動',
+    'hapticsHint': '按鍵、摺疊、滑動時一震',
   };
 
   static const _zhHans = <String, String>{
@@ -306,6 +320,13 @@ class T {
     'keyBarHint': '键盘上方一排按键，不受输入法影响',
     'copied': '已复制',
     'editorHintShort': '输入算式…   例如 2500*12',
+    'deleted': '已删除笔记',
+    'undo': '撤销',
+    'followSystem': '跟随系统',
+    'light': '浅色',
+    'themeHint': '跟随手机，或自己选',
+    'haptics': '触感震动',
+    'hapticsHint': '按键、折叠、滑动时一震',
   };
 
   static const _all = <String, Map<String, String>>{

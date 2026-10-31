@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'marked_controller.dart';
+import 'feedback.dart';
 import 'theme.dart';
 
 /// The phone's IME (Cangjie quick, a Chinese keyboard) cannot type `+ − × ÷`
@@ -35,6 +36,10 @@ const _symbols = [
 ];
 
 const _wordKeys = [
+  // `to` / `兌` make a conversion typeable without the IME ever leaving
+  // Chinese: a Chinese keyboard composes latin into hanzi before it lands.
+  'to',
+  '兌',
   'usd',
   'hkd',
   'cny',
@@ -92,7 +97,10 @@ class _KeyBarState extends State<KeyBar> {
 
   Widget _chip(String label, VoidCallback onTap) => GestureDetector(
     behavior: HitTestBehavior.opaque,
-    onTap: onTap,
+    onTap: () {
+      tapFeedback();
+      onTap();
+    },
     child: Container(
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 11),
