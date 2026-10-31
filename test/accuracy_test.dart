@@ -221,4 +221,26 @@ void main() {
     expect(one(r'$100 + 5'), r'$105.00');
     expect(one(r'$100 + 5 kg'), isNull);
   });
+
+  test('a bare number is a number, not a day or a time', () {
+    expect(one('0'), '0');
+    expect(one('00'), '0');
+    expect(one('05'), '5');
+    expect(one('12'), '12');
+    expect(one('31'), '31');
+    expect(one('99'), '99');
+    expect(one('1.5'), '1.5');
+  });
+
+  test('a date needs a date shape', () {
+    // a colon or am/pm is a clock time; the engine writes times with their day
+    expect(one('00:00'), '31 October 2026 at 12:00 AM');
+    expect(one('12:30'), '31 October 2026 at 12:30 PM');
+    expect(one('2026-10-31'), '31 October 2026');
+    expect(one('31/10'), '31 October 2026');
+    expect(one('12 Oct'), '12 October 2027', reason: 'a day gone is next year');
+    // ...and a slash pair that could be a month stays arithmetic
+    expect(one('1/2'), '0.5');
+    expect(one('100/4'), '25');
+  });
 }

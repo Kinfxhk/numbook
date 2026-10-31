@@ -184,6 +184,26 @@ class DateParser {
       return DateTime(base.year, base.month, base.day, t.$1, t.$2);
     }
 
+    // day/month: "31/10", "31/10/2026". Only when the first number cannot be a
+    // month, so "1/2" stays a half and "31/10" cannot be a wrong 3.1.
+    final slash = RegExp(r'^(\d{1,2})/(\d{1,2})(?:/(\d{4}))?$').firstMatch(s);
+    if (slash != null) {
+      final day = int.parse(slash.group(1)!);
+      final month = int.parse(slash.group(2)!);
+      if (day > 12) {
+        final year = slash.group(3) == null
+            ? base.year
+            : int.parse(slash.group(3)!);
+        if (!_isRealDate(year, month, day)) return null;
+        var d = DateTime(year, month, day);
+        // like a bare "12 Oct", a day already gone means next year
+        if (slash.group(3) == null && d.isBefore(_dateOnly(base))) {
+          d = DateTime(year + 1, month, day);
+        }
+        return d;
+      }
+    }
+
     // "March 12" / "12 March" / "March 12 2026"
     final m1 = RegExp(r'^([a-z]+)\.?\s+(\d{1,2})(?:,?\s+(\d{4}))?$')
         .firstMatch(lower);
@@ -234,6 +254,9 @@ class DateParser {
     final m = RegExp(r'^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$')
         .firstMatch(s.trim());
     if (m == null) return null;
+    // "12" is twelve, not noon: a clock time needs a colon or am/pm. Without
+    // this every line that was one or two digits answered a date instead.
+    if (m.group(2) == null && m.group(3) == null) return null;
     var h = int.parse(m.group(1)!);
     final min = m.group(2) == null ? 0 : int.parse(m.group(2)!);
     final ap = m.group(3);

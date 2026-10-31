@@ -35,6 +35,10 @@ class PaneState extends ChangeNotifier {
   bool dirty = false;
   DateTime? lastSaved;
 
+  /// True once the rule was dragged or auto-fitted here: the width is then the
+  /// user's, and may take room from the text (see editorMetrics).
+  bool explicitW = false;
+
   /// non-null while a section is folded: the full document, set aside
   List<String>? _foldSource;
   Set<int> _foldedLines = {};
@@ -191,6 +195,14 @@ class PaneState extends ChangeNotifier {
 
   void setAnswerWidth(double w) {
     answerW = w;
+    explicitW = true;
+    _notify();
+  }
+
+  /// The rule was grabbed: from here the width is the user's, not a default.
+  void grabWidth() {
+    if (explicitW) return;
+    explicitW = true;
     _notify();
   }
 
@@ -304,17 +316,23 @@ class EditorPane extends StatelessWidget {
         );
         // An empty note's column is narrower (see editorMetrics); tweening it
         // keeps the first answer from snapping the text sideways.
-        final target = editorMetrics(
+        final em = editorMetrics(
           width: constraints.maxWidth,
           answersVisible: answersVisible,
           wanted: pane.answerW,
           hasAnswers: hasAnswers,
-        ).answerW;
+          explicit: pane.explicitW,
+        );
+        final target = em.answerW;
         // a finger needs a 44dp handle; a mouse keeps the old 10dp feel
-        final hitW = switch (defaultTargetPlatform) {
-          TargetPlatform.android || TargetPlatform.iOS => 44.0,
-          _ => 10.0,
+        final touch = switch (defaultTargetPlatform) {
+          TargetPlatform.android || TargetPlatform.iOS => true,
+          _ => false,
         };
+        final hitW = touch ? 44.0 : 10.0;
+        // On touch the band leans into the answers: centred on the rule it
+        // would cover the last text column, and the caret took the gesture.
+        final hairIn = touch ? hitW * 0.7 : hitW / 2;
         return TweenAnimationBuilder<double>(
           tween: Tween(end: target),
           duration: const Duration(milliseconds: 140),
@@ -324,6 +342,7 @@ class EditorPane extends StatelessWidget {
               width: constraints.maxWidth,
               answersVisible: answersVisible,
               wanted: w,
+              explicit: pane.explicitW,
             );
             return Stack(
               children: [
@@ -337,6 +356,7 @@ class EditorPane extends StatelessWidget {
                     showSteps: showSteps,
                     explain: pane.engine.explain,
                     answerWidth: w,
+                    explicit: pane.explicitW,
                     scale: 1,
                     wheelBlocked: wheelBlocked,
                     showLineNumbers: showLineNumbers,
@@ -357,12 +377,17 @@ class EditorPane extends StatelessWidget {
                   Positioned(
                     top: 0,
                     bottom: 0,
-                    right: m.answerW + m.padH - hitW / 2,
+                    right: m.answerW + m.padH - hairIn,
                     width: hitW,
                     child: _AnswerDivider(
                       key: const ValueKey('answer-divider'),
                       pane: pane,
                       dark: dark,
+                      touch: touch,
+                      hairIn: hairIn,
+                      cap: em.cap,
+                      hasAnswers: hasAnswers,
+                      shown: m.answerW,
                       onAnswerWidth: onAnswerWidth,
                     ),
                   ),
@@ -535,38 +560,131 @@ class EditorPane extends StatelessWidget {
 }
 
 /// The draggable rule between text and answers. Its width is this pane's.
-class _AnswerDivider extends StatelessWidget {
+///
+/// Opaque on purpose: under this strip is the editor's own text field, and a
+/// translucent one hands the pointer to the caret's selection drag, which wins
+/// the touch arena — the reason a thumb could never move this rule.
+class _AnswerDivider extends StatefulWidget {
   final PaneState pane;
   final bool dark;
+  final bool touch;
+
+  /// The hairline's inset from the band's right edge: the band may lean into
+  /// the answers while the rule stays exactly where it was drawn.
+  final double hairIn;
+
+  /// The widest the pane will draw the column: a drag stops here.
+  final double cap;
+  final bool hasAnswers;
+
+  /// What the rule shows now. A drag starts from here, not from the stored
+  /// width: on a phone the column is capped, and a stored 212 would pin it.
+  final double shown;
+
   final ValueChanged<double> onAnswerWidth;
 
   const _AnswerDivider({
     super.key,
     required this.pane,
     required this.dark,
+    required this.touch,
+    required this.hairIn,
+    required this.cap,
+    required this.hasAnswers,
+    required this.shown,
     required this.onAnswerWidth,
   });
 
-  int get _widest => pane.results
+  @override
+  State<_AnswerDivider> createState() => _AnswerDividerState();
+}
+
+class _AnswerDividerState extends State<_AnswerDivider> {
+  double _from = 0;
+  double _base = 0;
+  double _total = 0;
+
+  int get _widest => widget.pane.results
       .map((r) => r.display?.length ?? 0)
       .fold<int>(0, (a, b) => a > b ? a : b);
 
+  /// The narrowest that still shows the widest answer whole — but never wider
+  /// than where the drag started, or grabbing the rule would jump it.
+  double get _minW {
+    if (!widget.hasAnswers) return 96;
+    return (_widest * 9.2 + 60).clamp(140.0, 520.0);
+  }
+
+  void _begin(double x) {
+    widget.pane.grabWidth();
+    _from = x;
+    _total = 0;
+    _base = widget.shown;
+  }
+
+  void _drag(double x) {
+    _total += x - _from;
+    _from = x;
+    final lo = _minW < _base ? _minW : _base;
+    final hi = widget.cap < lo ? lo : widget.cap;
+    widget.pane.setAnswerWidth((_base - _total).clamp(lo, hi));
+  }
+
+  void _end() => widget.onAnswerWidth(widget.pane.answerW);
+
   @override
   Widget build(BuildContext context) {
+    final hairline = Palette.hairline(widget.dark);
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
       child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragUpdate: (d) {
-          final minW = (_widest * 9.2 + 60).clamp(140.0, 520.0);
-          pane.setAnswerWidth((pane.answerW - d.delta.dx).clamp(minW, 520.0));
-        },
-        onHorizontalDragEnd: (_) => onAnswerWidth(pane.answerW),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (d) => _begin(d.globalPosition.dx),
+        onHorizontalDragUpdate: (d) => _drag(d.globalPosition.dx),
+        onHorizontalDragEnd: (_) => _end(),
+        // a thumb settles before it pulls: hold, then drag
+        onLongPressStart: (d) => _begin(d.globalPosition.dx),
+        onLongPressMoveUpdate: (d) => _drag(d.globalPosition.dx),
+        onLongPressEnd: (_) => _end(),
         onDoubleTap: () {
-          pane.setAnswerWidth((_widest * 9.2 + 44).clamp(140.0, 520.0));
-          onAnswerWidth(pane.answerW);
+          widget.pane.setAnswerWidth((_widest * 9.2 + 44).clamp(140.0, 520.0));
+          _end();
         },
-        child: Center(child: Container(width: 1, color: Palette.hairline(dark))),
+        child: Stack(
+          children: [
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: widget.hairIn - 0.5,
+              width: 1,
+              child: Container(width: 1, color: hairline),
+            ),
+            // discoverability without a new colour: the rule thickens a little
+            // where it can be pulled, while this pane has the caret
+            if (widget.touch)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: widget.hairIn - 1,
+                width: 2,
+                child: ListenableBuilder(
+                  listenable: widget.pane.focus,
+                  builder: (context, _) => !widget.pane.focus.hasFocus
+                      ? const SizedBox.shrink()
+                      : Center(
+                          child: Container(
+                            width: 2,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: hairline,
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
