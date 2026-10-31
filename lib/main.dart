@@ -526,8 +526,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   /// Split off: today's single editor. Split on: the two panes side by side
   /// when each one still gets the 340px a pane needs, stacked when it does not
-  /// (a phone, or a window narrower than a tablet).
-  Widget _panesView() {
+  /// (a phone, or a tablet with the sidebar open).
+  ///
+  /// [width] is the editor area, not the window: the sidebar takes 250px of it.
+  Widget _panesView(double width) {
     final b = _paneB;
     if (b == null) {
       return _pane(_paneA, focused: true, showTitle: false);
@@ -539,9 +541,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       showTitle: true,
       onUnsplit: _closeSplit,
     );
-    final w = MediaQuery.sizeOf(context).width;
-    final each = (w - 1) / 2; // one pane's own width, less the divider
-    final side = w >= 1000 || (w >= 700 && each >= 340);
+    final each = (width - 1) / 2; // one pane's own width, less the divider
+    final side = width >= 1000 || (width >= 700 && each >= 340);
     if (!side) {
       return Column(
         key: const ValueKey('split-column'),
@@ -902,7 +903,15 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                           Expanded(
                             child: Stack(
                               children: [
-                                Positioned.fill(child: _panesView()),
+                                Positioned.fill(
+                                  // the split's breakpoint is about the room
+                                  // the editor has, so measure that, not the
+                                  // window: the sidebar eats 250px of it
+                                  child: LayoutBuilder(
+                                    builder: (context, box) =>
+                                        _panesView(box.maxWidth),
+                                  ),
+                                ),
                                 if (_zoomHud)
                                   Positioned(
                                     right: 18,

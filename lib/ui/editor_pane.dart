@@ -276,44 +276,54 @@ class EditorPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final body = Stack(
-      children: [
-        Positioned.fill(
-          child: EditorView(
-            controller: pane.controller,
-            results: pane.results,
-            dark: dark,
-            answersVisible: answersVisible,
-            showSteps: showSteps,
-            explain: pane.engine.explain,
-            answerWidth: pane.answerW,
-            scale: 1,
-            wheelBlocked: wheelBlocked,
-            showLineNumbers: showLineNumbers,
-            onInsertReference: pane.insertReference,
-            lineMap: pane.lineMap,
-            foldable: pane.foldable,
-            folded: pane.folded,
-            onToggleFold: pane.toggleFold,
-            readOnly: pane.readOnly,
-            signColours: signColours,
-            positiveColour: positiveColour,
-            negativeColour: negativeColour,
-          ),
-        ),
-        if (answersVisible)
-          Positioned(
-            top: 0,
-            bottom: 0,
-            right: pane.answerW + 24 - 5,
-            width: 10,
-            child: _AnswerDivider(
-              pane: pane,
-              dark: dark,
-              onAnswerWidth: onAnswerWidth,
+    // the drag handle sits on the answer rule, which is drawn with these
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        final m = editorMetrics(
+          width: constraints.maxWidth,
+          answersVisible: answersVisible,
+          wanted: pane.answerW,
+        );
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: EditorView(
+                controller: pane.controller,
+                results: pane.results,
+                dark: dark,
+                answersVisible: answersVisible,
+                showSteps: showSteps,
+                explain: pane.engine.explain,
+                answerWidth: pane.answerW,
+                scale: 1,
+                wheelBlocked: wheelBlocked,
+                showLineNumbers: showLineNumbers,
+                onInsertReference: pane.insertReference,
+                lineMap: pane.lineMap,
+                foldable: pane.foldable,
+                folded: pane.folded,
+                onToggleFold: pane.toggleFold,
+                readOnly: pane.readOnly,
+                signColours: signColours,
+                positiveColour: positiveColour,
+                negativeColour: negativeColour,
+              ),
             ),
-          ),
-      ],
+            if (answersVisible)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: m.answerW + m.padH - 5,
+                width: 10,
+                child: _AnswerDivider(
+                  pane: pane,
+                  dark: dark,
+                  onAnswerWidth: onAnswerWidth,
+                ),
+              ),
+          ],
+        );
+      },
     );
 
     if (!showTitle) return body;

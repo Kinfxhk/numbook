@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -7,6 +9,51 @@ import '../engine/values.dart';
 import 'answer_column.dart';
 import 'feedback.dart';
 import 'theme.dart';
+
+/// How much room an editor gives its own chrome at a given pane width.
+///
+/// One pane's width decides the gutter, the side padding and the widest answer
+/// column that still leaves the text 200px. The split's drag handle measures
+/// with this too, so the rule and the handle's x cannot drift apart.
+class EditorMetrics {
+  /// One side of the horizontal padding.
+  final double padH;
+
+  /// Line-number / fold gutter.
+  final double gutter;
+
+  /// The answer column after clamping; 0 when answers are hidden.
+  final double answerW;
+
+  /// A phone-sized pane: thinner chrome, and no step chevron column.
+  final bool tight;
+
+  const EditorMetrics({
+    required this.padH,
+    required this.gutter,
+    required this.answerW,
+    required this.tight,
+  });
+}
+
+EditorMetrics editorMetrics({
+  required double width,
+  required bool answersVisible,
+  required double wanted,
+}) {
+  final tight = width < 560;
+  final padH = tight ? 12.0 : 24.0;
+  final gutter = tight ? 32.0 : 54.0;
+  // The answer column shrinks before the text does: a phone still needs a
+  // readable line, and a scaled-down number beats a two-word-wide column.
+  final room = math.max(0.0, width - gutter - padH * 2 - 200);
+  return EditorMetrics(
+    padH: padH,
+    gutter: gutter,
+    answerW: answersVisible ? math.min(wanted, room) : 0.0,
+    tight: tight,
+  );
+}
 
 /// A single text field with answers aligned to each logical line.
 ///
@@ -75,11 +122,17 @@ class EditorView extends StatefulWidget {
 
 class _EditorViewState extends State<EditorView> {
   final _scroll = ScrollController();
+  final _focus = FocusNode();
+
+  /// Line tops from the last build, so the caret can be scrolled into view.
+  List<double> _tops = const [];
+  double _lastHeight = 0;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onChanged);
+    _focus.addListener(_onChanged);
   }
 
   @override
@@ -91,27 +144,68 @@ class _EditorViewState extends State<EditorView> {
     }
   }
 
-  void _onChanged() => setState(() {});
+  void _onChanged() {
+    setState(() {});
+    // the caret moved, or the field was just tapped: a phone keyboard covers
+    // the bottom of the pane, so keep the line being typed above it
+    _revealCaret();
+  }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onChanged);
+    _focus.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Scroll the pane so the caret's line is inside it. Only the focused pane
+  /// does this, so the other sheet keeps the scroll position it had.
+  void _revealCaret() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focus.hasFocus || !_scroll.hasClients) return;
+      final sel = widget.controller.selection;
+      if (!sel.isValid) return;
+      final caret = sel.extentOffset.clamp(0, widget.controller.text.length);
+      final line = '\n'.allMatches(widget.controller.text.substring(0, caret)).length;
+      if (line >= _tops.length) return;
+      final top = _tops[line];
+      final pos = _scroll.position;
+      final view = pos.viewportDimension;
+      const lineH = 28.0;
+      final low = pos.pixels + 8;
+      final high = pos.pixels + view - lineH - 8;
+      if (top >= low && top <= high) return;
+      final target = top < low ? top - 8 : top + lineH - view + 8;
+      _scroll.jumpTo(target.clamp(0.0, pos.maxScrollExtent));
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final style = editorStyle(widget.dark, scale: widget.scale);
-    const stepGutter = 30.0; // finger-sized, but the icon stays small
-    const gutterW = 54.0; // fold arrow + faint line number, code-editor style
-    final answerW = widget.answersVisible ? widget.answerWidth : 0.0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final m = editorMetrics(
+          width: constraints.maxWidth,
+          answersVisible: widget.answersVisible,
+          wanted: widget.answerWidth,
+        );
+        final stepGutter = m.tight ? 0.0 : 30.0; // finger-sized on a desktop
+        final gutterW = m.gutter;
+        final answerW = m.answerW;
+        // the keyboard opening changes the height, not the caret: give the
+        // line being typed a nudge into view when the room shrinks
+        if (_lastHeight != constraints.maxHeight) {
+          _lastHeight = constraints.maxHeight;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _revealCaret());
+        }
         final text = widget.controller.text;
-        final textWidth = constraints.maxWidth - answerW - gutterW - 48;
+        final textWidth = constraints.maxWidth - answerW - gutterW - m.padH * 2;
         final tops = _lineTops(text, style, textWidth < 80 ? 80 : textWidth);
+        _tops = tops;
         // Text merges the ambient style at paint time. Measure that same
         // face, or a theme letter-spacing shows up only in the glyphs and
         // the row overflows by a fraction of a character.
@@ -130,7 +224,7 @@ class _EditorViewState extends State<EditorView> {
               widget.onInsertReference?.call(d.data, _tokenFor(d.data - 1)),
           builder: (context, candidate, rejected) => SingleChildScrollView(
             controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 96),
+            padding: EdgeInsets.fromLTRB(m.padH, 12, m.padH, 96),
             child: Stack(
               children: [
                 // faint line numbers, aligned with the same text metrics
@@ -163,6 +257,7 @@ class _EditorViewState extends State<EditorView> {
                   padding: EdgeInsets.only(left: gutterW, right: answerW),
                   child: TextField(
                     controller: widget.controller,
+                    focusNode: _focus,
                     maxLines: null,
                     style: style,
                     strutStyle: StrutStyle(

@@ -66,6 +66,32 @@ class ParseError implements Exception {
   String toString() => message;
 }
 
+/// A conversion word with nothing we understand after it ("5000 usd 兌").
+/// Not an error the reader needs to see: the line simply has no answer, and
+/// a missing answer beats a number that quietly dropped the request.
+class UnresolvedConversion extends ParseError {
+  UnresolvedConversion(super.message);
+}
+
+/// The words that mean "in this other currency / unit": `in`, `to`, `as`,
+/// `into`, the arrows, and their Chinese forms.
+const _convertWords = {
+  'in',
+  'to',
+  'as',
+  'into',
+  '兌',
+  '換',
+  '換成',
+  '換算',
+  '轉',
+  '轉成',
+  '换算',
+  '转',
+};
+
+bool isConversionWord(String word) => _convertWords.contains(word.toLowerCase());
+
 const _funcNames = {
   'sqrt',
   'cbrt',
@@ -110,9 +136,15 @@ class Parser {
     if (atEnd) throw ParseError('empty');
     final node = _additive();
     if (!atEnd) {
+      final rest = tokens.skip(_p).toList();
+      // A conversion word the parser could not use ("5000 usd 兌 hkd" with a
+      // word we do not know) means the line has no answer: reading it as
+      // "$5,000.00" would answer a question that was not asked.
+      if (rest.any((t) => t.type == TokType.word && isConversionWord(t.text))) {
+        throw UnresolvedConversion('unresolved conversion');
+      }
       // trailing words ("10% tax", "3 apples each") are not an error: the
       // answer we have is still the one the user meant.
-      final rest = tokens.skip(_p);
       final ignorable = rest.every(
         (t) =>
             t.type == TokType.word ||
@@ -145,6 +177,23 @@ class Parser {
   bool _isLowerX() {
     final c = cur;
     return c != null && c.type == TokType.word && c.text == 'x';
+  }
+
+  /// `->`, `=>` and `→`: the arrows people type instead of "to". The two
+  /// ASCII forms have to be adjacent, so "5 - > 3" stays nonsense.
+  int _arrowLength() {
+    final c = cur;
+    if (c == null || c.type != TokType.op) return 0;
+    if (c.text == '→') return 1;
+    if (c.text != '-' && c.text != '=') return 0;
+    final next = _p + 1 < tokens.length ? tokens[_p + 1] : null;
+    if (next == null ||
+        next.type != TokType.op ||
+        next.text != '>' ||
+        next.pos != c.pos + 1) {
+      return 0;
+    }
+    return 2;
   }
 
   bool _matchLparen() {
@@ -289,14 +338,27 @@ class Parser {
   Node _postfix() {
     var node = _primary();
     while (true) {
+      // "5000 usd -> hkd": an arrow is a conversion word, not a minus sign.
+      final arrow = _arrowLength();
+      if (arrow > 0) {
+        final save = _p;
+        _p += arrow;
+        final target = _readUnit();
+        if (target != null) {
+          node = ConvertNode(node, target);
+          continue;
+        }
+        _p = save;
+        break;
+      }
       final c = cur;
       if (c == null) break;
       if (c.type == TokType.word) {
         final w = c.text.toLowerCase();
         // "10 mod 3" belongs to the multiplicative level, not to a unit name.
         if (w == 'mod' || w == 'modulo' || w == '餘') break;
-        // conversion: "in" / "to" / "as" followed by a unit
-        if (w == 'in' || w == 'to' || w == 'as' || w == 'into') {
+        // conversion: "in" / "to" / "as" / "兌" followed by a unit
+        if (isConversionWord(w)) {
           final save = _p;
           _p++;
           final target = _readUnit();
@@ -431,6 +493,16 @@ class Parser {
     'today',
     'tomorrow',
     'yesterday',
+    // conversion words: a number followed by one of these is not a unit named
+    // after it ("5000 兌 hkd" must not become 5000 兌).
+    '兌',
+    '換',
+    '換成',
+    '換算',
+    '轉',
+    '轉成',
+    '换算',
+    '转',
   };
 
   Node _primary() {

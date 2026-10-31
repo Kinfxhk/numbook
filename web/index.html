@@ -20,6 +20,10 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="The notepad that adds up — every line is a calculation.">
   <meta name="theme-color" content="#FAF9F6">
+  <!-- The engine only adds its own viewport tag when this one is missing, so
+       declaring it here is what gets viewport-fit=cover in: without it the
+       editor runs under the notch and the iOS home indicator. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -43,6 +47,23 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Flutter's engine rewrites the viewport tag when it boots (it drops the
+    // flag), so put viewport-fit=cover back once the first frame is up. The
+    // app's SafeArea then keeps the header out of the notch and the status bar
+    // off the iOS home indicator.
+    (function () {
+      function fitCover() {
+        var meta = document.querySelector('meta[name=viewport]');
+        if (meta && meta.content.indexOf('viewport-fit=cover') < 0) {
+          meta.content = meta.content + ', viewport-fit=cover';
+        }
+      }
+      window.addEventListener('flutter-first-frame', fitCover);
+      window.addEventListener('load', fitCover);
+      window.addEventListener('resize', fitCover);
+    })();
+  </script>
   <script>
     // Tallynote's own worker: Flutter's generated one unregisters itself, and
     // an offline notepad must still open with the network unplugged.

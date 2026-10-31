@@ -55,6 +55,61 @@ void main() {
     expect(one('9 is to 16 as 27 is to what'), '48');
   });
 
+  /// A conversion the reader asked for, in the words they actually type:
+  /// arrows, and the Chinese forms. All of them must reach the same number.
+  test('conversion words: arrows and Chinese', () {
+    final fx = SheetEngine(
+      now: DateTime(2026, 10, 30, 9),
+      rates: const {'USD': 1, 'HKD': 7.8, 'CNY': 7.2, 'JPY': 150},
+    );
+    String? at(String line) => fx.evaluate([line]).first.display;
+    const hkd = r'HK$39,000.00';
+    for (final line in [
+      '5000 usd to hkd',
+      '5000 usd -> hkd',
+      '5000 usd → hkd',
+      '5000 usd => hkd',
+      '5000 usd 兌 hkd',
+      '5000 usd 換 hkd',
+      '5000 usd 換成 hkd',
+      '5000 usd 換算 hkd',
+      '5000 usd 轉 hkd',
+      '5000 usd 轉成 hkd',
+      '5000 usd 换算 hkd',
+      '5000 usd 转 hkd',
+      '5000 USD -> HKD',
+    ]) {
+      expect(at(line), hkd, reason: line);
+    }
+    expect(at('5000 美元 兌 港幣'), hkd);
+    expect(at('7200 cny -> usd'), r'$1,000.00');
+    expect(at('1000 cny 兌 hkd'), r'HK$1,083.33');
+    expect(at('150 jpy -> cny'), startsWith('¥'));
+    expect(at('1000 hkd 轉成 jpy'), startsWith('¥'));
+  });
+
+  /// The other direction: a conversion word we cannot read leaves the line
+  /// unanswered instead of printing the number that was in front of it.
+  test('an unreadable conversion answers nothing', () {
+    final fx = SheetEngine(
+      now: DateTime(2026, 10, 30, 9),
+      rates: const {'USD': 1, 'HKD': 7.8},
+    );
+    for (final line in [
+      '5000 usd 兌 znx',
+      '5000 usd 兌',
+      '5000 usd 兌 33',
+      '5000 usd -> zzz',
+      '5000 usd 換成',
+    ]) {
+      final r = fx.evaluate([line]).first;
+      expect(r.display, isNull, reason: line);
+      expect(r.engineError, isFalse, reason: line);
+    }
+    // and the plain ones still answer
+    expect(one('10% tax'), '10%');
+  });
+
   test('conditional', () {
     expect(one('if 5 > 3 then 10 else 20'), '10');
   });

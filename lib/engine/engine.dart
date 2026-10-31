@@ -258,6 +258,12 @@ class SheetEngine {
             tag: tag,
           ),
         );
+      } on UnresolvedConversion {
+        // "5000 usd 兌 hkd" with a word we cannot read: no answer at all, and
+        // nothing to explain — the number would be the wrong answer.
+        values.add(null);
+        leafAt.add(null);
+        results.add(LineResult(text: raw, tag: tag));
       } catch (e) {
         final fallback = strict ? null : _loneNumber(body);
         values.add(fallback);
