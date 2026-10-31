@@ -159,7 +159,10 @@ void main() {
   });
 
   test('in is inches only when no word follows it', () {
-    expect(one('10500 in sci'), '10,500');
+    // A conversion word we do not understand leaves the line unanswered:
+    // 10,500 would answer a question about scientific notation with a plain
+    // number. (The parser used to drop the word and print 10,500.)
+    expect(one('10500 in sci'), isNull);
     expect(one('12 inches in feet'), '1 ft');
     expect(one('5 in'), '5 in');
   });
