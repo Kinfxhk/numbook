@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../engine/engine.dart';
 import '../i18n/strings.dart';
@@ -40,6 +41,7 @@ EditorMetrics editorMetrics({
   required double width,
   required bool answersVisible,
   required double wanted,
+  bool hasAnswers = true,
 }) {
   final tight = width < 560;
   final padH = tight ? 12.0 : 24.0;
@@ -47,10 +49,15 @@ EditorMetrics editorMetrics({
   // The answer column shrinks before the text does: a phone still needs a
   // readable line, and a scaled-down number beats a two-word-wide column.
   final room = math.max(0.0, width - gutter - padH * 2 - 200);
+  // An empty note has nothing to align, so on a phone the column only keeps
+  // room for the hint. Desktop keeps its width: the hint there is long.
+  final cap = !hasAnswers && tight
+      ? math.min(room, math.min(120.0, width * 0.25))
+      : room;
   return EditorMetrics(
     padH: padH,
     gutter: gutter,
-    answerW: answersVisible ? math.min(wanted, room) : 0.0,
+    answerW: answersVisible ? math.min(wanted, cap) : 0.0,
     tight: tight,
   );
 }
@@ -82,6 +89,10 @@ class EditorView extends StatefulWidget {
   final double scale;
   final bool showLineNumbers;
 
+  /// The pane owns the focus node (the key bar asks whether it has focus).
+  /// Standalone use — a test harness — gets a node of its own.
+  final FocusNode? focusNode;
+
   /// True while Ctrl is held, so the wheel can zoom instead of scrolling.
   final ValueListenable<bool>? wheelBlocked;
   final Color? positiveColour;
@@ -110,6 +121,7 @@ class EditorView extends StatefulWidget {
     this.readOnly = false,
     this.scale = 1,
     this.showLineNumbers = true,
+    this.focusNode,
     this.wheelBlocked,
     this.positiveColour,
     this.negativeColour,
@@ -122,7 +134,10 @@ class EditorView extends StatefulWidget {
 
 class _EditorViewState extends State<EditorView> {
   final _scroll = ScrollController();
-  final _focus = FocusNode();
+
+  /// Only ours to close when the pane did not hand one over.
+  FocusNode? _ownFocus;
+  late final FocusNode _focus = widget.focusNode ?? (_ownFocus = FocusNode());
 
   /// Line tops from the last build, so the caret can be scrolled into view.
   List<double> _tops = const [];
@@ -145,6 +160,7 @@ class _EditorViewState extends State<EditorView> {
   }
 
   void _onChanged() {
+    if (!mounted) return;
     setState(() {});
     // the caret moved, or the field was just tapped: a phone keyboard covers
     // the bottom of the pane, so keep the line being typed above it
@@ -154,7 +170,8 @@ class _EditorViewState extends State<EditorView> {
   @override
   void dispose() {
     widget.controller.removeListener(_onChanged);
-    _focus.dispose();
+    _focus.removeListener(_onChanged);
+    _ownFocus?.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -272,7 +289,10 @@ class _EditorViewState extends State<EditorView> {
                     decoration: InputDecoration(
                       isCollapsed: true,
                       border: InputBorder.none,
-                      hintText: LocaleScope.t(context, 'editorHint'),
+                      hintText: LocaleScope.t(
+                        context,
+                        m.tight ? 'editorHintShort' : 'editorHint',
+                      ),
                     ),
                     keyboardType: TextInputType.multiline,
                     textCapitalization: TextCapitalization.none,
@@ -372,8 +392,9 @@ class _EditorViewState extends State<EditorView> {
         style: style.copyWith(fontStyle: FontStyle.italic),
       );
     }
-    final cell = _tapForSteps(
+    final cell = _answerGestures(
       line: r.text,
+      display: r.display!,
       canExplain:
           widget.showSteps && widget.explain != null && _hasOperators(r.text),
       child: AnswerReadout(
@@ -446,26 +467,36 @@ class _EditorViewState extends State<EditorView> {
         : (widget.positiveColour ?? Palette.positive(widget.dark));
   }
 
-  /// The whole answer cell is the tap target on phones — the chevron is a
-  /// hint, not a 16px button.
-  Widget _tapForSteps({
+  /// Tap expands the steps; a long press (or a desktop right-click) copies
+  /// the number, which is the thing people actually want off a phone.
+  /// The whole cell is the target — the chevron is a hint, not a 16px button.
+  Widget _answerGestures({
     required String line,
+    required String display,
     required bool canExplain,
     required Widget child,
   }) {
-    // when dragging is available the cell must stay hit-testable
-    if (!canExplain) {
-      return widget.onInsertReference == null
-          ? IgnorePointer(child: child)
-          : child;
-    }
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        tapFeedback();
-        _openSteps(line);
-      },
+      onTap: canExplain
+          ? () {
+              tapFeedback();
+              _openSteps(line);
+            }
+          : null,
+      onLongPress: () => _copy(display),
+      onSecondaryTap: () => _copy(display),
       child: child,
+    );
+  }
+
+  void _copy(String display) {
+    Clipboard.setData(ClipboardData(text: display));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text(LocaleScope.t(context, 'copied')),
+        duration: const Duration(milliseconds: 1100),
+      ),
     );
   }
 

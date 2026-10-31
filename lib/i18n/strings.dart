@@ -106,6 +106,10 @@ class T {
     'editorHint': 'Type a calculation…   e.g.  rent = 2500  ·  total of #food',
     'language': 'Language',
     'languageHint': 'Interface language',
+    'keyBar': 'Calculation keys',
+    'keyBarHint': 'A key row above the keyboard, whatever the IME',
+    'copied': 'Copied',
+    'editorHintShort': 'Type a calculation…   e.g. 2500*12',
   };
 
   static const _zhHant = <String, String>{
@@ -200,6 +204,10 @@ class T {
     'editorHint': '輸入算式…   例如  rent = 2500  ·  total of #food',
     'language': '語言',
     'languageHint': '介面語言',
+    'keyBar': '算式工具列',
+    'keyBarHint': '鍵盤上方一排按鍵，不受輸入法影響',
+    'copied': '已複製',
+    'editorHintShort': '輸入算式…   例如 2500*12',
   };
 
   static const _zhHans = <String, String>{
@@ -294,6 +302,10 @@ class T {
     'editorHint': '输入算式…   例如  rent = 2500  ·  total of #food',
     'language': '语言',
     'languageHint': '界面语言',
+    'keyBar': '算式工具栏',
+    'keyBarHint': '键盘上方一排按键，不受输入法影响',
+    'copied': '已复制',
+    'editorHintShort': '输入算式…   例如 2500*12',
   };
 
   static const _all = <String, Map<String, String>>{

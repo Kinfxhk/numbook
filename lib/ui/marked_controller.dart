@@ -13,6 +13,41 @@ class MarkedController extends TextEditingController {
   List<Set<String>> labelsByLine = const [];
   MarkedController({super.text, required this.dark});
 
+  /// Put [s] where the caret is (replacing a selection), as the key bar's
+  /// chips do: a phone's IME never sees these keys, so they land as typed.
+  void insertAtCaret(String s) {
+    final v = value;
+    final sel = v.selection.isValid
+        ? v.selection
+        : TextSelection.collapsed(offset: text.length);
+    final start = sel.start.clamp(0, text.length);
+    final end = sel.end.clamp(0, text.length);
+    final next = text.replaceRange(start, end, s);
+    value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + s.length),
+    );
+  }
+
+  /// Delete the selection, or the character before the caret.
+  void deleteBack() {
+    final v = value;
+    final sel = v.selection.isValid
+        ? v.selection
+        : TextSelection.collapsed(offset: text.length);
+    var start = sel.start.clamp(0, text.length);
+    final end = sel.end.clamp(0, text.length);
+    if (start == end) {
+      if (start == 0) return;
+      start -= 1;
+    }
+    final next = text.replaceRange(start, end, '');
+    value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start),
+    );
+  }
+
   @override
   TextSpan buildTextSpan({
     required BuildContext context,

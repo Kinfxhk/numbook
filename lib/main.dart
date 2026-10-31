@@ -18,6 +18,7 @@ import 'engine/values.dart';
 import 'ui/editor_pane.dart';
 import 'ui/feedback.dart';
 import 'ui/formatting.dart';
+import 'ui/key_bar.dart';
 import 'ui/settings_sheet.dart';
 import 'ui/sidebar.dart';
 import 'ui/theme.dart';
@@ -54,6 +55,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   bool _answersVisible = true;
   bool _autoRates = true;
   bool _steps = true;
+
+  /// The calculation key row above the keyboard. On by default: a phone IME
+  /// cannot type `+ − × ÷`, which is the whole point of it.
+  bool _keyBar = true;
 
   /// The stored default answer width; each pane keeps its own once dragged.
   double _answerW = 212;
@@ -135,6 +140,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _answersVisible = prefs.getBool('tallynote.answers') ?? true;
     _autoRates = prefs.getBool('tallynote.autoRates') ?? true;
     _steps = prefs.getBool('tallynote.steps') ?? true;
+    _keyBar = prefs.getBool('tallynote.keyBar') ?? true;
     _answerW = prefs.getDouble('tallynote.answerWidth') ?? 212;
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
@@ -298,6 +304,35 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     });
     if (active != null && active != _paneA.sheetId) _paneA.load(active);
     _saveSettings();
+  }
+
+  /// True while BACK has an in-app layer to close, outermost first: the
+  /// format bar (a selection), the drawer, the split, then the keyboard.
+  bool get _backStacked =>
+      _focused.hasSelection ||
+      (_scaffoldKey.currentState?.isDrawerOpen ?? false) ||
+      _split ||
+      _focused.focus.hasFocus;
+
+  void _back() {
+    if (_focused.hasSelection) {
+      final c = _focused.controller;
+      setState(() {
+        c.selection = TextSelection.collapsed(offset: c.selection.extentOffset);
+      });
+      return;
+    }
+    final scaffold = _scaffoldKey.currentState;
+    if (scaffold?.isDrawerOpen ?? false) {
+      scaffold!.closeDrawer();
+      return;
+    }
+    if (_split) {
+      // the focused pane stays: it is the one the user is reading
+      _closeSplit();
+      return;
+    }
+    if (_focused.focus.hasFocus) _focused.focus.unfocus();
   }
 
   void _closeTab(String id) {
@@ -481,6 +516,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setBool('tallynote.answers', _answersVisible);
     await prefs.setBool('tallynote.autoRates', _autoRates);
     await prefs.setBool('tallynote.steps', _steps);
+    await prefs.setBool('tallynote.keyBar', _keyBar);
     await prefs.setDouble('tallynote.answerWidth', _answerW);
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
@@ -671,7 +707,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       },
       navigatorKey: _navKey,
       theme: theme,
-      home: CallbackShortcuts(
+      home: PopScope(
+        canPop: !_backStacked,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _back();
+        },
+        child: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
               _zoom(1.25),
@@ -849,6 +890,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 setState(() => _steps = v);
                                 _saveSettings();
                               },
+                              keyBar: _keyBar,
+                              onKeyBar: (v) {
+                                setState(() => _keyBar = v);
+                                _saveSettings();
+                              },
                               onSignColours: (v) {
                                 setState(() => _signColours = v);
                                 _saveSettings();
@@ -949,7 +995,17 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                             answers: _focused.results
                                 .where((r) => r.display != null)
                                 .length,
+                            onSave: _saveNow,
                           ),
+                          // only with a soft keyboard up: a desktop never
+                          // sees this row
+                          if (_keyBar && _focused.focus.hasFocus)
+                            _KeyboardSlot(
+                              child: KeyBar(
+                                controller: _focused.controller,
+                                dark: _dark,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -958,10 +1014,45 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
               ),
             ),
           ),
+          ),
         ),
       ),
     );
   }
+}
+
+/// Shows [child] only while a soft keyboard is up. Scaffold removes the inset
+/// from its body's MediaQuery, so this watches the view instead.
+class _KeyboardSlot extends StatefulWidget {
+  final Widget child;
+
+  const _KeyboardSlot({required this.child});
+
+  @override
+  State<_KeyboardSlot> createState() => _KeyboardSlotState();
+}
+
+class _KeyboardSlotState extends State<_KeyboardSlot>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) => View.of(context).viewInsets.bottom > 0
+      ? widget.child
+      : const SizedBox.shrink();
 }
 
 class _Header extends StatelessWidget {
@@ -1066,6 +1157,7 @@ class _StatusBar extends StatelessWidget {
   final bool justSaved;
   final bool saveFailed;
   final DateTime? savedAt;
+  final VoidCallback onSave;
 
   const _StatusBar({
     required this.dark,
@@ -1075,6 +1167,7 @@ class _StatusBar extends StatelessWidget {
     required this.justSaved,
     required this.saveFailed,
     required this.savedAt,
+    required this.onSave,
   });
 
   /// "editing…" while the debounce is pending, else the last save time.
@@ -1124,11 +1217,20 @@ class _StatusBar extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           if (_saveLabelFor(locale).isNotEmpty) ...[
-            Text(
-              _saveLabelFor(locale),
-              style: TextStyle(
-                fontSize: 11,
-                color: justSaved ? Palette.positive(dark) : Palette.faint(dark),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onSave,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  _saveLabelFor(locale),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: justSaved
+                        ? Palette.positive(dark)
+                        : Palette.faint(dark),
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
