@@ -46,6 +46,7 @@ class _SidebarState extends State<Sidebar> {
     final searching = _query.trim().isNotEmpty;
     final matches = searching ? _store.search(_query) : const <Sheet>[];
     final unfiled = _store.inFolder(null);
+    final phone = MediaQuery.sizeOf(context).width < 720;
 
     return Container(
       width: 250,
@@ -138,11 +139,19 @@ class _SidebarState extends State<Sidebar> {
             ),
           ),
           Divider(height: 1, color: Palette.hairline(_dark)),
-          _action(
-            icon: Icons.add,
-            label: LocaleScope.t(context, 'newSheet'),
-            onTap: () => _store.create(),
-          ),
+          // one-handed: the primary verb is a full-width target, low enough
+          // for a thumb to reach without stretching
+          if (phone)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+              child: _newSheetButton(context),
+            )
+          else
+            _action(
+              icon: Icons.add,
+              label: LocaleScope.t(context, 'newSheet'),
+              onTap: () => _store.create(),
+            ),
           _action(
             icon: Icons.create_new_folder_outlined,
             label: LocaleScope.t(context, 'newFolder'),
@@ -153,6 +162,28 @@ class _SidebarState extends State<Sidebar> {
       ),
     );
   }
+
+  Widget _newSheetButton(BuildContext context) => Pressable(
+    onTap: () => _store.create(),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(4),
+      border: Border.all(color: Palette.hairline(_dark)),
+    ),
+    child: SizedBox(
+      height: 48,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add, size: 18, color: Palette.answer(_dark)),
+          const SizedBox(width: 8),
+          Text(
+            LocaleScope.t(context, 'newSheet'),
+            style: TextStyle(fontSize: 14, color: Palette.fg(_dark)),
+          ),
+        ],
+      ),
+    ),
+  );
 
   // ---- rows ----------------------------------------------------------------
 
@@ -283,15 +314,33 @@ class _SidebarState extends State<Sidebar> {
       ],
     );
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-      decoration: BoxDecoration(
-        color: selected
-            ? (_dark ? const Color(0xFF232426) : const Color(0xFFE7E3DA))
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(3),
-      ),
-      child: Row(
+    // Swipe left to delete (with an undo), right to pin: the same two verbs
+    // the long-press menu carries, for one hand. Dismissible owns the
+    // horizontal drag, so the list still scrolls vertically.
+    return Dismissible(
+      key: ValueKey('swipe-${s.id}'),
+      background: _swipeHint(pin: true),
+      secondaryBackground: _swipeHint(pin: false),
+      confirmDismiss: (dir) async {
+        if (dir == DismissDirection.startToEnd) {
+          // a pin is not a removal: put the row straight back
+          tapFeedback(light: true);
+          _store.togglePin(s.id);
+          return false;
+        }
+        tapFeedback(light: true);
+        return true;
+      },
+      onDismissed: (_) => _deleteSheet(s),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        decoration: BoxDecoration(
+          color: selected
+              ? (_dark ? const Color(0xFF232426) : const Color(0xFFE7E3DA))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Row(
         children: [
           // selecting and opening the menu are separate targets
           Expanded(
@@ -317,8 +366,49 @@ class _SidebarState extends State<Sidebar> {
             ),
           ),
         ],
+        ),
       ),
     );
+  }
+
+  /// The colour the row slides back to: pin on the left, delete on the right.
+  Widget _swipeHint({required bool pin}) {
+    final tint = pin ? Palette.answer(_dark) : Palette.negative(_dark);
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      alignment: pin ? Alignment.centerLeft : Alignment.centerRight,
+      color: tint.withValues(alpha: 0.12),
+      child: Icon(
+        pin ? Icons.push_pin : Icons.delete_outline,
+        size: 16,
+        color: tint,
+      ),
+    );
+  }
+
+  /// A swipe-delete leaves a five-second window: the store puts the very same
+  /// sheet back, id and text included.
+  void _deleteSheet(Sheet s) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final locale = LocaleScope.of(context);
+    _store.delete(s.id);
+    // on a phone the drawer would cover the undo bar, so step out of it
+    if (MediaQuery.sizeOf(context).width < 720) {
+      Navigator.of(context).maybePop();
+    }
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text(T.of(locale, 'deleted')),
+          action: SnackBarAction(
+            label: T.of(locale, 'undo'),
+            onPressed: () => _store.restore(s),
+          ),
+        ),
+      );
   }
 
   Widget _action({
@@ -370,6 +460,7 @@ class _SidebarState extends State<Sidebar> {
             _menuRow(
               LocaleScope.t(context, 'deleteFolder'),
               () => Navigator.pop(ctx, 'delete'),
+              danger: true,
             ),
           ],
         ),
@@ -431,6 +522,7 @@ class _SidebarState extends State<Sidebar> {
             _menuRow(
               LocaleScope.t(context, 'deleteSheet'),
               () => Navigator.pop(ctx, 'delete'),
+              danger: true,
             ),
           ],
         ),
@@ -453,16 +545,27 @@ class _SidebarState extends State<Sidebar> {
     }
   }
 
-  Widget _menuRow(String label, VoidCallback onTap) => Pressable(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 14, color: Palette.fg(_dark)),
-      ),
-    ),
-  );
+  /// A touch row: 48dp, so a thumb hits it (a bottom sheet sits under one).
+  Widget _menuRow(String label, VoidCallback onTap, {bool danger = false}) =>
+      Pressable(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: danger ? Palette.negative(_dark) : Palette.fg(_dark),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
 
   Future<String?> _prompt(String title, String hint, {String? initial}) async {
     final c = TextEditingController(text: initial ?? '');

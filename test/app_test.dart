@@ -104,6 +104,8 @@ void main() {
 
     // the whole answer cell is the target, not the 16px glyph
     await tester.tap(find.textContaining('9'));
+    // a double tap now inserts a reference, so a single tap waits it out
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
     expect(find.text('Steps'), findsOneWidget);
     expect(find.textContaining('1 + 2 = 3'), findsOneWidget);

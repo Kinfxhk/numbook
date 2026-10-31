@@ -47,8 +47,18 @@ void main() {
     await tester.tap(find.text('A'));
     await tester.pump();
     expect(find.text('usd'), findsOneWidget);
-    expect(find.text('打八折'), findsOneWidget);
+    // the conversion word lives in the bar too: an IME that composes latin
+    // into hanzi can neither type `to` nor `兌`
+    expect(find.text('to'), findsOneWidget);
+    expect(find.text('兌'), findsOneWidget);
     expect(find.text('+'), findsNothing);
+
+    // the page is wider than the screen: the tail is a scroll away
+    await tester.drag(find.text('usd'), const Offset(-400, 0));
+    await tester.pump();
+    expect(find.text('打八折'), findsOneWidget);
+    await tester.drag(find.text('打八折'), const Offset(400, 0));
+    await tester.pump();
 
     caretAt(11);
     await tester.tap(find.text('usd'));

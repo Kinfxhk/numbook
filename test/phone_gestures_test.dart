@@ -184,6 +184,8 @@ void main() {
 
       // the tap still expands the steps
       await tester.tap(find.textContaining('5,000').last);
+      // a double tap now inserts a reference, so a single tap waits it out
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       expect(find.text('Steps'), findsOneWidget);
       await tester.tap(find.text('Close'));

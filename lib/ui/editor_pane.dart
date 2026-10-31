@@ -7,6 +7,7 @@ import '../data/document.dart';
 import '../engine/engine.dart';
 import '../i18n/strings.dart';
 import 'editor_view.dart';
+import 'feedback.dart';
 import 'folding.dart';
 import 'formatting.dart';
 import 'marked_controller.dart';
@@ -177,6 +178,11 @@ class PaneState extends ChangeNotifier {
     );
   }
 
+  /// A double-tapped answer goes where the caret already is: on a phone the
+  /// caret is mid-note, and appending would put the reference out of reach.
+  void insertReferenceAtCaret(int line, String token) =>
+      controller.insertAtCaret(token);
+
   void format(String open, String close) {
     if (!hasSelection) return;
     final (text, selection) = Fmt.wrap(controller.text, controller.selection, open, close);
@@ -191,10 +197,17 @@ class PaneState extends ChangeNotifier {
   /// Fold or unfold the section that starts at [original].
   /// Folding swaps the visible text for a projection, so the editor is
   /// read-only until the section is opened again — nothing can be lost.
-  void toggleFold(int original) {
+  void toggleFold(int original) => setFolds(
+    _foldedLines.contains(original)
+        ? (Set<int>.from(_foldedLines)..remove(original))
+        : {..._foldedLines, original},
+  );
+
+  /// The chevron's long press: every section at once, toggling either way.
+  void toggleAllFolds() => setFolds(_foldedLines.isEmpty ? foldable : {});
+
+  void setFolds(Set<int> folded) {
     final source = _foldSource ?? controller.text.split('\n');
-    final folded = Set<int>.from(_foldedLines);
-    if (!folded.remove(original)) folded.add(original);
 
     if (folded.isEmpty) {
       controller.text = source.join('\n');
@@ -328,6 +341,8 @@ class EditorPane extends StatelessWidget {
                     wheelBlocked: wheelBlocked,
                     showLineNumbers: showLineNumbers,
                     onInsertReference: pane.insertReference,
+                    onInsertReferenceAtCaret: pane.insertReferenceAtCaret,
+                    onFoldAll: pane.toggleAllFolds,
                     lineMap: pane.lineMap,
                     foldable: pane.foldable,
                     folded: pane.folded,
@@ -403,57 +418,114 @@ class EditorPane extends StatelessWidget {
               ),
             ),
           ),
-          PopupMenuButton<String>(
-            tooltip: T.of(locale, 'sheets'),
-            padding: EdgeInsets.zero,
-            iconSize: 14,
-            onSelected: (v) {
-              if (v == _newSheet) {
-                pane.store.create();
-              } else if (v == _unsplit) {
-                onUnsplit?.call();
-              } else {
-                onPickSheet(v);
-              }
-            },
-            itemBuilder: (ctx) => [
-              PopupMenuItem(
-                value: _newSheet,
-                height: 34,
-                child: Text(T.of(locale, 'newSheet'), style: _itemStyle),
+          if (MediaQuery.sizeOf(context).width < 700)
+            // a popup here is pinned to the touch point and clipped at the
+            // screen edge; the sheet sits where the thumb already is
+            Pressable(
+              onTap: () => _pickSheet(context, sheets),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Icon(
+                Icons.keyboard_arrow_down,
+                size: 14,
+                color: Palette.faint(dark),
               ),
-              const PopupMenuDivider(),
-              for (final sheet in sheets)
+            )
+          else
+            PopupMenuButton<String>(
+              tooltip: T.of(locale, 'sheets'),
+              padding: EdgeInsets.zero,
+              iconSize: 14,
+              onSelected: _picked,
+              itemBuilder: (ctx) => [
                 PopupMenuItem(
-                  value: sheet.id,
+                  value: _newSheet,
                   height: 34,
-                  child: Text(
-                    sheet.title.isEmpty
-                        ? T.of(locale, 'untitled')
-                        : sheet.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _itemStyle,
-                  ),
+                  child: Text(T.of(locale, 'newSheet'), style: _itemStyle),
                 ),
-              if (onUnsplit != null) ...[
                 const PopupMenuDivider(),
-                PopupMenuItem(
-                  value: _unsplit,
-                  height: 34,
-                  child: Text(T.of(locale, 'unsplit'), style: _itemStyle),
-                ),
+                for (final sheet in sheets)
+                  PopupMenuItem(
+                    value: sheet.id,
+                    height: 34,
+                    child: Text(
+                      sheet.title.isEmpty
+                          ? T.of(locale, 'untitled')
+                          : sheet.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _itemStyle,
+                    ),
+                  ),
+                if (onUnsplit != null) ...[
+                  const PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: _unsplit,
+                    height: 34,
+                    child: Text(T.of(locale, 'unsplit'), style: _itemStyle),
+                  ),
+                ],
               ],
-            ],
-            icon: Icon(
-              Icons.keyboard_arrow_down,
-              size: 14,
-              color: Palette.faint(dark),
+              icon: Icon(
+                Icons.keyboard_arrow_down,
+                size: 14,
+                color: Palette.faint(dark),
+              ),
             ),
-          ),
         ],
       ),
     );
+  }
+
+  void _picked(String v) {
+    if (v == _newSheet) {
+      pane.store.create();
+    } else if (v == _unsplit) {
+      onUnsplit?.call();
+    } else {
+      onPickSheet(v);
+    }
+  }
+
+  /// The phone's answer to the popup: 48dp rows at the bottom of the screen.
+  Future<void> _pickSheet(BuildContext context, List<Sheet> sheets) async {
+    final locale = LocaleScope.of(context);
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Palette.bg(dark),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (value, label) in [
+              (_newSheet, T.of(locale, 'newSheet')),
+              for (final s in sheets)
+                (s.id, s.title.isEmpty ? T.of(locale, 'untitled') : s.title),
+              if (onUnsplit != null) (_unsplit, T.of(locale, 'unsplit')),
+            ])
+              Pressable(
+                onTap: () => Navigator.pop(ctx, value),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _itemStyle,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) _picked(chosen);
   }
 
   static const _newSheet = '__new';

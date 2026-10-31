@@ -272,6 +272,15 @@ class DocumentStore extends ChangeNotifier {
     _persist();
   }
 
+  /// Undo a delete: the same sheet comes back, id and text untouched.
+  void restore(Sheet s) {
+    if (sheets.any((e) => e.id == s.id)) return;
+    sheets.add(s);
+    activeId = s.id;
+    notifyListeners();
+    _persist();
+  }
+
   /// A user-chosen name, which stops the first line from renaming the sheet.
   void rename(String id, String title) {
     final s = sheets.where((e) => e.id == id).firstOrNull;

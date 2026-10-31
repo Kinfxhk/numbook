@@ -12,10 +12,12 @@ import 'theme.dart';
 Future<void> showSettingsSheet({
   required BuildContext context,
   required bool dark,
+  required String themeMode,
   required bool answersVisible,
   required bool autoRates,
   required bool steps,
   required bool keyBar,
+  required bool haptics,
   required bool signColours,
   required String posName,
   required String negName,
@@ -27,7 +29,8 @@ Future<void> showSettingsSheet({
   required ValueChanged<String> onLocale,
   required ValueChanged<String> onNumberPreset,
   required ValueChanged<bool> onAnswers,
-  required ValueChanged<bool> onTheme,
+  required ValueChanged<String> onThemeMode,
+  required ValueChanged<bool> onHaptics,
   required ValueChanged<bool> onAutoRates,
   required ValueChanged<bool> onSteps,
   required ValueChanged<bool> onKeyBar,
@@ -43,10 +46,12 @@ Future<void> showSettingsSheet({
     context: context,
     builder: (_) => _SettingsDialog(
       dark: dark,
+      themeMode: themeMode,
       answersVisible: answersVisible,
       autoRates: autoRates,
       steps: steps,
       keyBar: keyBar,
+      haptics: haptics,
       signColours: signColours,
       posName: posName,
       negName: negName,
@@ -58,7 +63,8 @@ Future<void> showSettingsSheet({
       onNumberPreset: onNumberPreset,
       onLocale: onLocale,
       onAnswers: onAnswers,
-      onTheme: onTheme,
+      onThemeMode: onThemeMode,
+      onHaptics: onHaptics,
       onAutoRates: onAutoRates,
       onSteps: onSteps,
       onKeyBar: onKeyBar,
@@ -75,10 +81,12 @@ Future<void> showSettingsSheet({
 
 class _SettingsDialog extends StatefulWidget {
   final bool dark;
+  final String themeMode;
   final bool answersVisible;
   final bool autoRates;
   final bool steps;
   final bool keyBar;
+  final bool haptics;
   final bool signColours;
   final String posName;
   final String negName;
@@ -90,7 +98,8 @@ class _SettingsDialog extends StatefulWidget {
   final ValueChanged<String> onLocale;
   final ValueChanged<String> onNumberPreset;
   final ValueChanged<bool> onAnswers;
-  final ValueChanged<bool> onTheme;
+  final ValueChanged<String> onThemeMode;
+  final ValueChanged<bool> onHaptics;
   final ValueChanged<bool> onAutoRates;
   final ValueChanged<bool> onSteps;
   final ValueChanged<bool> onKeyBar;
@@ -104,10 +113,12 @@ class _SettingsDialog extends StatefulWidget {
 
   const _SettingsDialog({
     required this.dark,
+    required this.themeMode,
     required this.answersVisible,
     required this.autoRates,
     required this.steps,
     required this.keyBar,
+    required this.haptics,
     required this.signColours,
     required this.posName,
     required this.negName,
@@ -119,7 +130,8 @@ class _SettingsDialog extends StatefulWidget {
     required this.onLocale,
     required this.onNumberPreset,
     required this.onAnswers,
-    required this.onTheme,
+    required this.onThemeMode,
+    required this.onHaptics,
     required this.onAutoRates,
     required this.onSteps,
     required this.onKeyBar,
@@ -138,10 +150,12 @@ class _SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<_SettingsDialog> {
   late bool dark = widget.dark;
+  late String themeMode = widget.themeMode;
   late bool answers = widget.answersVisible;
   late bool autoRates = widget.autoRates;
   late bool steps = widget.steps;
   late bool keyBar = widget.keyBar;
+  late bool haptics = widget.haptics;
   late bool signColours = widget.signColours;
   late String pos = widget.posName;
   late String neg = widget.negName;
@@ -213,12 +227,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     children: [
       _languageRow(),
       _row(
-        T.of(locale, 'dark'),
-        T.of(locale, 'darkHint'),
-        _switch(dark, (v) {
-          setState(() => dark = v);
-          widget.onTheme(v);
-        }, 'dark'),
+        T.of(locale, 'theme'),
+        T.of(locale, 'themeHint'),
+        _threeWay(
+          const ['system', 'light', 'dark'],
+          themeMode,
+          (v) {
+            setState(() {
+              themeMode = v;
+              // the dialog's own colours follow, previewing the choice
+              dark = v == 'dark' ||
+                  (v == 'system' &&
+                      MediaQuery.platformBrightnessOf(context) ==
+                          Brightness.dark);
+            });
+            widget.onThemeMode(v);
+          },
+          id: 'theme',
+        ),
       ),
       _row(
         T.of(locale, 'answers'),
@@ -319,6 +345,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           widget.onKeyBar(v);
         }, 'keyBar'),
       ),
+      _row(
+        T.of(locale, 'haptics'),
+        T.of(locale, 'hapticsHint'),
+        _switch(haptics, (v) {
+          setState(() => haptics = v);
+          widget.onHaptics(v);
+        }, 'haptics'),
+      ),
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
         child: Text(
@@ -417,30 +451,29 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     ),
   );
 
-  Widget _row(String label, String hint, Widget trailing) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-    child: Row(
+  /// A settings row. A phone cannot hold a five-button control beside its
+  /// label, so under 380dp the control goes underneath instead of overflowing.
+  Widget _row(String label, String hint, Widget trailing) {
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(fontSize: 13.5, color: Palette.fg(dark)),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                hint,
-                style: TextStyle(fontSize: 11, color: Palette.faint(dark)),
-              ),
-            ],
-          ),
-        ),
-        trailing,
+        Text(label, style: TextStyle(fontSize: 13.5, color: Palette.fg(dark))),
+        const SizedBox(height: 2),
+        Text(hint, style: TextStyle(fontSize: 11, color: Palette.faint(dark))),
       ],
-    ),
-  );
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: LayoutBuilder(
+        builder: (context, box) => box.maxWidth < 380
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [text, const SizedBox(height: 8), trailing],
+              )
+            : Row(children: [Expanded(child: text), trailing]),
+      ),
+    );
+  }
 
   Widget _colourRow(String label, String current, ValueChanged<String> pick) =>
       Padding(
@@ -474,6 +507,42 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
       );
 
+  /// A row of short choices, like the language one: the theme has three.
+  Widget _threeWay(
+    List<String> values,
+    String current,
+    ValueChanged<String> pick, {
+    required String id,
+  }) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (final v in values)
+        TextButton(
+          key: ValueKey('$id-$v'),
+          onPressed: () => pick(v),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(30, 28),
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            foregroundColor: current == v
+                ? Palette.answer(dark)
+                : Palette.faint(dark),
+          ),
+          child: Text(
+            switch (v) {
+              'system' => T.of(locale, 'followSystem'),
+              'light' => T.of(locale, 'light'),
+              _ => T.of(locale, 'dark'),
+            },
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: current == v ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ),
+    ],
+  );
+
   Widget _switch(bool value, ValueChanged<bool> onChanged, [String? id]) =>
       Switch(
         key: id == null ? null : ValueKey('switch-$id'),
@@ -484,8 +553,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _scaleButtons() {
     const presets = [1.0, 1.25, 1.5, 1.75, 2.0];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    // a Wrap, so a narrow dialog flows five presets onto a second line
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         for (final p in presets)
           Pressable(

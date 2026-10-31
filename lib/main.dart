@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -51,6 +52,13 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   bool _routingOwn = false;
 
   bool _dark = false;
+
+  /// 'system' | 'light' | 'dark'. A phone default follows the OS; a desktop
+  /// keeps the light default it always had.
+  String _themeMode = 'light';
+
+  /// Settings → haptics: the tick on a key, a fold, a swipe.
+  bool _haptics = true;
   bool _sidebarOpen = true;
   bool _answersVisible = true;
   bool _autoRates = true;
@@ -62,6 +70,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   /// The stored default answer width; each pane keeps its own once dragged.
   double _answerW = 212;
+
+  /// The split's share going to the first pane, dragged by the divider.
+  double _splitRatio = 0.5;
   double _uiScale = 1.0;
   String? _locale; // null = follow the system
   String _numberPreset = 'us';
@@ -136,12 +147,20 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   Future<void> _boot() async {
     final prefs = await SharedPreferences.getInstance();
-    _dark = prefs.getBool('tallynote.dark') ?? false;
+    _themeMode =
+        prefs.getString('tallynote.theme') ??
+        (defaultTargetPlatform == TargetPlatform.android
+            // a phone follows its own light/dark switch
+            ? 'system'
+            : ((prefs.getBool('tallynote.dark') ?? false) ? 'dark' : 'light'));
+    _haptics = prefs.getBool('tallynote.haptics') ?? true;
+    Haptics.on = _haptics;
     _answersVisible = prefs.getBool('tallynote.answers') ?? true;
     _autoRates = prefs.getBool('tallynote.autoRates') ?? true;
     _steps = prefs.getBool('tallynote.steps') ?? true;
     _keyBar = prefs.getBool('tallynote.keyBar') ?? true;
     _answerW = prefs.getDouble('tallynote.answerWidth') ?? 212;
+    _splitRatio = prefs.getDouble('tallynote.splitRatio') ?? 0.5;
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
     _numberPreset = prefs.getString('tallynote.numberFormat') ?? 'us';
@@ -266,6 +285,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   void _toggleSplit() {
+    tapFeedback(light: true);
     if (_split) {
       _closeSplit();
       return;
@@ -353,6 +373,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       if (mounted) setState(() => _zoomHud = false);
     });
     _saveSettings();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    // the theme follows the system: repaint without waiting for a tap
+    if (mounted) setState(() {});
   }
 
   @override
@@ -512,12 +538,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('tallynote.dark', _dark);
+    await prefs.setString('tallynote.theme', _themeMode);
+    await prefs.setBool('tallynote.haptics', _haptics);
     await prefs.setBool('tallynote.answers', _answersVisible);
     await prefs.setBool('tallynote.autoRates', _autoRates);
     await prefs.setBool('tallynote.steps', _steps);
     await prefs.setBool('tallynote.keyBar', _keyBar);
     await prefs.setDouble('tallynote.answerWidth', _answerW);
+    await prefs.setDouble('tallynote.splitRatio', _splitRatio);
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
     await prefs.setString('tallynote.numberFormat', _numberPreset);
@@ -577,28 +605,62 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       showTitle: true,
       onUnsplit: _closeSplit,
     );
-    final each = (width - 1) / 2; // one pane's own width, less the divider
+    final each = (width - _SplitDivider.hit) / 2; // one pane, less the handle
     final side = width >= 1000 || (width >= 700 && each >= 340);
-    if (!side) {
-      return Column(
-        key: const ValueKey('split-column'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: top),
-          Divider(height: 1, color: Palette.hairline(_dark)),
-          Expanded(child: bottom),
-        ],
-      );
-    }
-    return Row(
-      key: const ValueKey('split-row'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(child: top),
-        VerticalDivider(width: 1, color: Palette.hairline(_dark)),
-        Expanded(child: bottom),
-      ],
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        // the drag's unit is the area the two panes share, not the pointer
+        final total = (side ? box.maxWidth : box.maxHeight) - _SplitDivider.hit;
+        final first = (total * _splitRatio).clamp(0.0, total);
+        final handle = _SplitDivider(
+          dark: _dark,
+          vertical: !side,
+          onDrag: (dx) => setState(
+            () => _splitRatio = (_splitRatio + dx / total).clamp(0.15, 0.85),
+          ),
+          onDragEnd: _saveSettings,
+          onReset: () {
+            setState(() => _splitRatio = 0.5);
+            _saveSettings();
+          },
+          onSwap: _swapPanes,
+        );
+        if (!side) {
+          return Column(
+            key: const ValueKey('split-column'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(height: first, child: top),
+              handle,
+              Expanded(child: bottom),
+            ],
+          );
+        }
+        return Row(
+          key: const ValueKey('split-row'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: first, child: top),
+            handle,
+            Expanded(child: bottom),
+          ],
+        );
+      },
     );
+  }
+
+  /// Long-pressing the divider: the two panes trade places, cursor and all.
+  void _swapPanes() {
+    final b = _paneB;
+    if (b == null) return;
+    tapFeedback(light: true);
+    setState(() {
+      _paneB = _paneA;
+      _paneA = b;
+      _focusB = !_focusB;
+    });
+    _saveSettings();
   }
 
   Widget _pane(
@@ -630,12 +692,37 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // one place decides the brightness: a system change rebuilds this, and
+    // nothing else may read a stale _dark
+    _dark = switch (_themeMode) {
+      // the dispatcher, not MediaQuery: this build sits above the app's own
+      // MediaQuery and the observer below re-runs it when the phone flips
+      'system' =>
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark,
+      'dark' => true,
+      _ => false,
+    };
     for (final p in _livePanes) {
       p.controller.dark = _dark;
       // each line only sees the names defined above it
       p.applyLabels();
     }
     final wide = MediaQuery.sizeOf(context).width >= 720;
+    final media = MediaQuery.of(context);
+    final tabsRow = _showTabs && _tabs.length > 1;
+    // the key row plus a soft keyboard must never squeeze the editor under
+    // 120dp: in landscape they would, so the row is the one that gives way
+    final editorRoom =
+        media.size.height -
+        media.padding.top -
+        media.padding.bottom -
+        media.viewInsets.bottom -
+        46 - // header
+        26 - // status bar
+        (tabsRow ? 30 : 0);
+    final showKeyBar =
+        _keyBar && (media.viewInsets.bottom == 0 || editorRoom - 44 >= 120);
     final theme = buildTheme(_dark);
 
     final sidebar = Sidebar(
@@ -852,6 +939,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                             onSettings: () => showSettingsSheet(
                               context: _navKey.currentContext!,
                               dark: _dark,
+                              themeMode: _themeMode,
                               answersVisible: _answersVisible,
                               autoRates: _autoRates,
                               steps: _steps,
@@ -878,8 +966,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 setState(() => _answersVisible = v);
                                 _saveSettings();
                               },
-                              onTheme: (v) {
-                                setState(() => _dark = v);
+                              onThemeMode: (v) {
+                                setState(() => _themeMode = v);
+                                _saveSettings();
+                              },
+                              haptics: _haptics,
+                              onHaptics: (v) {
+                                Haptics.on = v;
+                                setState(() => _haptics = v);
                                 _saveSettings();
                               },
                               onAutoRates: (v) {
@@ -930,7 +1024,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                             ),
                           ),
                           Divider(height: 1, color: Palette.hairline(_dark)),
-                          if (_showTabs && _tabs.length > 1)
+                          if (tabsRow)
                             _TabBar(
                               dark: _dark,
                               tabs: _tabs,
@@ -999,7 +1093,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                           ),
                           // only with a soft keyboard up: a desktop never
                           // sees this row
-                          if (_keyBar && _focused.focus.hasFocus)
+                          if (showKeyBar && _focused.focus.hasFocus)
                             _KeyboardSlot(
                               child: KeyBar(
                                 controller: _focused.controller,
@@ -1016,6 +1110,65 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The rule between the two panes: drag to set the share of the area they
+/// split, double-tap back to 50/50, long-press to trade places. Fifteen
+/// device pixels of finger, with the app's hairline still one pixel wide.
+class _SplitDivider extends StatelessWidget {
+  /// The whole target, in either direction.
+  static const hit = 15.0;
+
+  final bool dark;
+
+  /// True while the panes are stacked: the drag is vertical.
+  final bool vertical;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragEnd;
+  final VoidCallback onReset;
+  final VoidCallback onSwap;
+
+  const _SplitDivider({
+    required this.dark,
+    required this.vertical,
+    required this.onDrag,
+    required this.onDragEnd,
+    required this.onReset,
+    required this.onSwap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final line = vertical
+        ? Container(height: 1, color: Palette.hairline(dark))
+        : Container(width: 1, color: Palette.hairline(dark));
+    return MouseRegion(
+      cursor: vertical
+          ? SystemMouseCursors.resizeRow
+          : SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        key: const ValueKey('split-divider'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: vertical ? null : (d) => onDrag(d.delta.dx),
+        onVerticalDragUpdate: vertical ? (d) => onDrag(d.delta.dy) : null,
+        onHorizontalDragEnd: vertical ? null : (_) => onDragEnd(),
+        onVerticalDragEnd: vertical ? (_) => onDragEnd() : null,
+        onDoubleTap: onReset,
+        onLongPress: onSwap,
+        child: vertical
+            ? SizedBox(
+                height: hit,
+                width: double.infinity,
+                child: Center(child: line),
+              )
+            : SizedBox(
+                width: hit,
+                height: double.infinity,
+                child: Center(child: line),
+              ),
       ),
     );
   }
