@@ -217,32 +217,77 @@ void main() {
     expect(tester.widget<TextField>(fieldAt(1)).controller!.text, '42');
   });
 
-  testWidgets('a pane whose sheet is deleted falls back, then the split closes', (
+  testWidgets('closing the split inside the debounce keeps the newest text', (
     tester,
   ) async {
-    await boot(tester, const Size(1440, 900), prefs: threeSheets());
+    await boot(tester, const Size(1440, 900), prefs: twoSheets());
     await toggle(tester);
-    expect(
-      find.descendant(of: paneAt(1), matching: find.text('Beta')),
-      findsOneWidget,
-    );
+    await tester.tap(fieldAt(1));
+    await tester.enterText(fieldAt(1), 'newest 7');
+    await tester.pump(const Duration(milliseconds: 100)); // still inside 400 ms
+    await toggle(tester);
+    await tester.pump(const Duration(milliseconds: 600));
 
-    // a sidebar tap needs the haptic channel the test engine never answers,
-    // so remove the sheets through the store the app itself is using
-    final store = tester.widget<Sidebar>(find.byType(Sidebar)).store;
-
-    store.delete('b'); // the right pane's sheet
-    await tester.pump(const Duration(milliseconds: 60));
-    expect(find.byType(EditorPane), findsNWidgets(2), reason: 'a third sheet');
-    expect(
-      find.descendant(of: paneAt(1), matching: find.text('Gamma')),
-      findsOneWidget,
-    );
-
-    store.delete('c'); // the last sheet the right pane could take
-    await tester.pump(const Duration(milliseconds: 60));
-    expect(find.byType(EditorPane), findsOneWidget, reason: 'nothing left');
-    // the single pane is Alpha again, and it kept its text
-    expect(tester.widget<TextField>(fieldAt(0)).controller!.text, 'alpha note');
+    expect(find.byType(EditorPane), findsOneWidget);
+    expect(tester.widget<TextField>(fieldAt(0)).controller!.text, 'newest 7');
   });
+
+  testWidgets('a restart with the right pane focused keeps both sides', (
+    tester,
+  ) async {
+    await boot(tester, const Size(1440, 900), prefs: twoSheets());
+    await toggle(tester);
+    await tester.tap(fieldAt(1));
+    await tester.enterText(fieldAt(1), '42');
+    await tester.pump(const Duration(milliseconds: 600));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.pumpWidget(const TallynoteApp());
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(
+      find.descendant(of: paneAt(0), matching: find.text('Alpha')),
+      findsOneWidget,
+    );
+    expect(tester.widget<TextField>(fieldAt(1)).controller!.text, '42');
+  });
+
+  testWidgets(
+    'a pane whose sheet is deleted falls back, then the split closes',
+    (tester) async {
+      await boot(tester, const Size(1440, 900), prefs: threeSheets());
+      await toggle(tester);
+      expect(
+        find.descendant(of: paneAt(1), matching: find.text('Beta')),
+        findsOneWidget,
+      );
+
+      // a sidebar tap needs the haptic channel the test engine never answers,
+      // so remove the sheets through the store the app itself is using
+      final store = tester.widget<Sidebar>(find.byType(Sidebar)).store;
+
+      store.delete('b'); // the right pane's sheet
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(
+        find.byType(EditorPane),
+        findsNWidgets(2),
+        reason: 'a third sheet',
+      );
+      expect(
+        find.descendant(of: paneAt(1), matching: find.text('Gamma')),
+        findsOneWidget,
+      );
+
+      store.delete('c'); // the last sheet the right pane could take
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(find.byType(EditorPane), findsOneWidget, reason: 'nothing left');
+      // the single pane is Alpha again, and it kept its text
+      expect(
+        tester.widget<TextField>(fieldAt(0)).controller!.text,
+        'alpha note',
+      );
+    },
+  );
 }
