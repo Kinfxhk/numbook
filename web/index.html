@@ -36,8 +36,52 @@
 
   <title>Tallynote</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Start the 1.2 MB app download before the bootstrap is parsed, so the
+       engine is not waiting on it after the loader runs. (A preload for
+       canvaskit.wasm was measured too: the engine fetched it again anyway, so
+       it only doubled that 2 MB. Left out.) -->
+  <link rel="preload" as="script" href="main.dart.js">
+
+  <!-- The page is blank until Flutter paints, which on a cold cache is over a
+       second. This static shell fills that time, in Palette colours. -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #FAF9F6; }
+    #tn-boot {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+      font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+    }
+    #tn-boot .tn-mark { font-size: 22px; font-weight: 500; color: #1C1B19; }
+    #tn-boot .tn-bar {
+      width: 96px; height: 2px; border-radius: 1px;
+      background: #14000000; overflow: hidden;
+    }
+    #tn-boot .tn-bar i {
+      display: block; height: 100%; width: 40%; border-radius: 1px;
+      background: #A8442B; animation: tn-slide 1.1s ease-in-out infinite;
+    }
+    #tn-boot .tn-hint { font-size: 12px; letter-spacing: 0.06em; color: #8A8578; }
+    @keyframes tn-slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(250%); }
+    }
+    @media (prefers-color-scheme: dark) {
+      html, body { background: #17181A; }
+      #tn-boot .tn-mark { color: #E8E6E1; }
+      #tn-boot .tn-bar { background: #1AFFFFFF; }
+      #tn-boot .tn-bar i { background: #E8B75A; }
+      #tn-boot .tn-hint { color: #8E8B84; }
+    }
+  </style>
 </head>
 <body>
+  <div id="tn-boot" role="status" aria-live="polite">
+    <div class="tn-mark">Tallynote</div>
+    <div class="tn-bar"><i></i></div>
+    <div class="tn-hint">載入中…</div>
+  </div>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -48,18 +92,23 @@
   -->
   <script src="flutter_bootstrap.js" async></script>
   <script>
-    // Flutter's engine rewrites the viewport tag when it boots (it drops the
-    // flag), so put viewport-fit=cover back once the first frame is up. The
-    // app's SafeArea then keeps the header out of the notch and the status bar
-    // off the iOS home indicator.
     (function () {
+      var boot = document.getElementById('tn-boot');
+      function firstFrame() {
+        if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
+        fitCover();
+      }
+      // Flutter's engine rewrites the viewport tag when it boots (it drops the
+      // flag), so put viewport-fit=cover back once the first frame is up. The
+      // app's SafeArea then keeps the header out of the notch and the status bar
+      // off the iOS home indicator.
       function fitCover() {
         var meta = document.querySelector('meta[name=viewport]');
         if (meta && meta.content.indexOf('viewport-fit=cover') < 0) {
           meta.content = meta.content + ', viewport-fit=cover';
         }
       }
-      window.addEventListener('flutter-first-frame', fitCover);
+      window.addEventListener('flutter-first-frame', firstFrame);
       window.addEventListener('load', fitCover);
       window.addEventListener('resize', fitCover);
     })();
@@ -72,6 +121,18 @@
         navigator.serviceWorker
           .register(new URL('service_worker.js', document.baseURI))
           .catch(function (e) { console.warn('tallynote: no offline cache', e); });
+      });
+      // The worker answers the shell from cache, so ask it once the app is up
+      // whether a newer deploy exists. If one does it refreshes the cache and
+      // says so, and the page reloads once — that is what keeps "a fix is live
+      // on the next open" while the open itself costs no round trip.
+      window.addEventListener('flutter-first-frame', function () {
+        navigator.serviceWorker.ready
+          .then(function (r) { if (r.active) r.active.postMessage('tn-check'); })
+          .catch(function () {});
+      });
+      navigator.serviceWorker.addEventListener('message', function (e) {
+        if (e.data === 'tn-reload') window.location.reload();
       });
     }
   </script>
