@@ -15,6 +15,7 @@ Future<void> showSettingsSheet({
   required bool answersVisible,
   required bool autoRates,
   required bool steps,
+  required bool keyBar,
   required bool signColours,
   required String posName,
   required String negName,
@@ -29,6 +30,7 @@ Future<void> showSettingsSheet({
   required ValueChanged<bool> onTheme,
   required ValueChanged<bool> onAutoRates,
   required ValueChanged<bool> onSteps,
+  required ValueChanged<bool> onKeyBar,
   required ValueChanged<bool> onSignColours,
   required ValueChanged<String> onPosColour,
   required ValueChanged<String> onNegColour,
@@ -44,6 +46,7 @@ Future<void> showSettingsSheet({
       answersVisible: answersVisible,
       autoRates: autoRates,
       steps: steps,
+      keyBar: keyBar,
       signColours: signColours,
       posName: posName,
       negName: negName,
@@ -58,6 +61,7 @@ Future<void> showSettingsSheet({
       onTheme: onTheme,
       onAutoRates: onAutoRates,
       onSteps: onSteps,
+      onKeyBar: onKeyBar,
       onSignColours: onSignColours,
       onPosColour: onPosColour,
       onNegColour: onNegColour,
@@ -74,6 +78,7 @@ class _SettingsDialog extends StatefulWidget {
   final bool answersVisible;
   final bool autoRates;
   final bool steps;
+  final bool keyBar;
   final bool signColours;
   final String posName;
   final String negName;
@@ -88,6 +93,7 @@ class _SettingsDialog extends StatefulWidget {
   final ValueChanged<bool> onTheme;
   final ValueChanged<bool> onAutoRates;
   final ValueChanged<bool> onSteps;
+  final ValueChanged<bool> onKeyBar;
   final ValueChanged<bool> onSignColours;
   final ValueChanged<String> onPosColour;
   final ValueChanged<String> onNegColour;
@@ -101,6 +107,7 @@ class _SettingsDialog extends StatefulWidget {
     required this.answersVisible,
     required this.autoRates,
     required this.steps,
+    required this.keyBar,
     required this.signColours,
     required this.posName,
     required this.negName,
@@ -115,6 +122,7 @@ class _SettingsDialog extends StatefulWidget {
     required this.onTheme,
     required this.onAutoRates,
     required this.onSteps,
+    required this.onKeyBar,
     required this.onSignColours,
     required this.onPosColour,
     required this.onNegColour,
@@ -133,6 +141,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late bool answers = widget.answersVisible;
   late bool autoRates = widget.autoRates;
   late bool steps = widget.steps;
+  late bool keyBar = widget.keyBar;
   late bool signColours = widget.signColours;
   late String pos = widget.posName;
   late String neg = widget.negName;
@@ -301,6 +310,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           setState(() => steps = v);
           widget.onSteps(v);
         }),
+      ),
+      _row(
+        T.of(locale, 'keyBar'),
+        T.of(locale, 'keyBarHint'),
+        _switch(keyBar, (v) {
+          setState(() => keyBar = v);
+          widget.onKeyBar(v);
+        }, 'keyBar'),
       ),
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
