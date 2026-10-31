@@ -71,6 +71,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   /// The stored default answer width; each pane keeps its own once dragged.
   double _answerW = 212;
 
+  /// ...and whether that width was set by hand, which lets it exceed the
+  /// comfortable cap without snapping back on the next launch.
+  bool _answerWSet = false;
+
   /// The split's share going to the first pane, dragged by the divider.
   double _splitRatio = 0.5;
   double _uiScale = 1.0;
@@ -130,6 +134,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       sheetId: sheetId,
       makeEngine: _makeEngine,
       answerW: _answerW,
+      explicitW: _answerWSet,
     )..addListener(_onPane);
     // an empty id means "not bound yet": _boot loads the active sheet into it
     pane.load(sheetId);
@@ -160,6 +165,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _steps = prefs.getBool('tallynote.steps') ?? true;
     _keyBar = prefs.getBool('tallynote.keyBar') ?? true;
     _answerW = prefs.getDouble('tallynote.answerWidth') ?? 212;
+    _answerWSet = prefs.getBool('tallynote.answerWidthSet') ?? false;
+    for (final p in _livePanes) {
+      p.adoptWidth(_answerW, _answerWSet);
+    }
     _splitRatio = prefs.getDouble('tallynote.splitRatio') ?? 0.5;
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
@@ -545,6 +554,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setBool('tallynote.steps', _steps);
     await prefs.setBool('tallynote.keyBar', _keyBar);
     await prefs.setDouble('tallynote.answerWidth', _answerW);
+    await prefs.setBool('tallynote.answerWidthSet', _answerWSet);
     await prefs.setDouble('tallynote.splitRatio', _splitRatio);
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
@@ -686,6 +696,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     onPickSheet: _activate,
     onAnswerWidth: (w) {
       _answerW = w;
+      _answerWSet = true;
       _saveSettings();
     },
   );
