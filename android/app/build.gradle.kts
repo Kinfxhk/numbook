@@ -3,7 +3,10 @@ import java.util.Properties
 
 // Release signing lives outside the repo: ~/.tallynote/key.properties
 val keystoreProperties = Properties()
-val keystoreFile = file(System.getProperty("user.home") + "/.tallynote/key.properties")
+// CI points at a written-out key.properties (its HOME is not guaranteed to be
+// what the Gradle daemon sees); a local build keeps using ~/.tallynote.
+val keystoreFile = System.getenv("TALLYNOTE_KEY_PROPERTIES")?.let { file(it) }
+    ?: file(System.getProperty("user.home") + "/.tallynote/key.properties")
 val hasReleaseKey = keystoreFile.exists()
 if (hasReleaseKey) {
     keystoreProperties.load(FileInputStream(keystoreFile))

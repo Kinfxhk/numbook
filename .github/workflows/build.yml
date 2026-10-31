@@ -42,14 +42,16 @@ jobs:
           # previous APK. Without it Flutter falls back to the runner's debug key,
           # which is different in every job (learned the hard way on 0.4.2).
           test -n "$KEYSTORE_B64" || { echo 'no signing key in secrets'; exit 1; }
-          mkdir -p "$HOME/.tallynote"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.tallynote/release.p12"
+          SIGN="$GITHUB_WORKSPACE/.signing"
+          mkdir -p "$SIGN"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$SIGN/release.p12"
           {
-            echo "storeFile=$HOME/.tallynote/release.p12"
+            echo "storeFile=$SIGN/release.p12"
             echo "keyAlias=$KEYSTORE_ALIAS"
             echo "storePassword=$KEYSTORE_PASSWORD"
             echo "keyPassword=$KEYSTORE_PASSWORD"
-          } > "$HOME/.tallynote/key.properties"
+          } > "$SIGN/key.properties"
+          echo "TALLYNOTE_KEY_PROPERTIES=$SIGN/key.properties" >> "$GITHUB_ENV"
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
