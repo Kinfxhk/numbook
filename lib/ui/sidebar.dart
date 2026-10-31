@@ -164,7 +164,11 @@ class _SidebarState extends State<Sidebar> {
   }
 
   Widget _newSheetButton(BuildContext context) => Pressable(
-    onTap: () => _store.create(),
+    onTap: () {
+      _store.create();
+      // the point of the button is to type: do not leave the drawer in the way
+      Navigator.of(context).maybePop();
+    },
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(4),
       border: Border.all(color: Palette.hairline(_dark)),

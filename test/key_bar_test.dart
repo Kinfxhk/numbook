@@ -63,7 +63,9 @@ void main() {
     caretAt(11);
     await tester.tap(find.text('usd'));
     await tester.pump();
-    expect(c.text, 'rent = 2500usd');
+    // a word chip carries its own space, so chips chain into "5000usd to hkd"
+    // without the IME ever leaving Chinese
+    expect(c.text, 'rent = 2500usd ');
 
     // and back to the symbols
     await tester.tap(find.text('123'));

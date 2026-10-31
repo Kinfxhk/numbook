@@ -61,7 +61,12 @@ class _KeyBarState extends State<KeyBar> {
       widget.controller.deleteBack();
       return;
     }
-    widget.controller.insertAtCaret(key == '↵' ? '\n' : key);
+    // a word chip ends in a space: `5000` `usd` `to` `hkd` must read
+    // "5000usd to hkd", or the engine sees one word called usdtohkd
+    final word = _wordPage && key.length > 1;
+    widget.controller.insertAtCaret(
+      key == '↵' ? '\n' : (word ? '$key ' : key),
+    );
   }
 
   @override

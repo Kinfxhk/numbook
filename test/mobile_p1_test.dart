@@ -458,6 +458,34 @@ void main() {
     });
   });
 
+  testWidgets('the word chips alone can write a conversion', (tester) async {
+    await boot(tester, phone, prefs: twoSheets());
+    await tester.tap(editor());
+    await tester.pump();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump();
+
+    await tester.enterText(editor(), '5000');
+    await tester.pump(const Duration(milliseconds: 30));
+
+    // the IME never leaves Chinese: every word comes from a chip
+    await tester.tap(find.text('A'));
+    await tester.pump();
+    for (final word in ['usd', 'to', 'hkd']) {
+      await tester.tap(find.text(word));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await tester.pump(const Duration(milliseconds: 60));
+
+    expect(textOf(tester, editor()), '5000usd to hkd ');
+    expect(
+      find.textContaining('HK\$'),
+      findsOneWidget,
+      reason: 'the chips carry their own spaces, so the conversion parses',
+    );
+    tester.view.resetViewInsets();
+  });
+
   testWidgets('the theme follows the system until it is told otherwise', (
     tester,
   ) async {
