@@ -29,11 +29,15 @@ class EditorMetrics {
   /// A phone-sized pane: thinner chrome, and no step chevron column.
   final bool tight;
 
+  /// The widest this pane will draw the column: a drag clamps to it.
+  final double cap;
+
   const EditorMetrics({
     required this.padH,
     required this.gutter,
     required this.answerW,
     required this.tight,
+    required this.cap,
   });
 }
 
@@ -42,6 +46,7 @@ EditorMetrics editorMetrics({
   required bool answersVisible,
   required double wanted,
   bool hasAnswers = true,
+  bool explicit = false,
 }) {
   final tight = width < 560;
   final padH = tight ? 12.0 : 24.0;
@@ -49,16 +54,20 @@ EditorMetrics editorMetrics({
   // The answer column shrinks before the text does: a phone still needs a
   // readable line, and a scaled-down number beats a two-word-wide column.
   final room = math.max(0.0, width - gutter - padH * 2 - 200);
-  // An empty note has nothing to align, so on a phone the column only keeps
-  // room for the hint. Desktop keeps its width: the hint there is long.
-  final cap = !hasAnswers && tight
-      ? math.min(room, math.min(120.0, width * 0.25))
-      : room;
+  // ...unless the user dragged the rule: then the line keeps 96dp and wraps,
+  // which is what dragging a rule means. 200 is the default, not a limit.
+  final dragged = math.max(room, width - gutter - padH * 2 - 96);
+  // An empty note has nothing to align, so the column only keeps room for the
+  // hint — a quarter of the pane at most.
+  final cap = hasAnswers
+      ? (explicit ? dragged : room)
+      : math.min(room, width * 0.25);
   return EditorMetrics(
     padH: padH,
     gutter: gutter,
     answerW: answersVisible ? math.min(wanted, cap) : 0.0,
     tight: tight,
+    cap: cap,
   );
 }
 
@@ -106,6 +115,9 @@ class EditorView extends StatefulWidget {
   /// painted, or `1.234,56` aligns on the grouping dot.
   final NumberFormat numberFormat;
 
+  /// The user set this width by hand, so it may take room from the text.
+  final bool explicit;
+
   const EditorView({
     super.key,
     required this.controller,
@@ -132,6 +144,7 @@ class EditorView extends StatefulWidget {
     this.positiveColour,
     this.negativeColour,
     this.numberFormat = NumberFormat.us,
+    this.explicit = false,
   });
 
   @override
@@ -215,6 +228,7 @@ class _EditorViewState extends State<EditorView> {
           width: constraints.maxWidth,
           answersVisible: widget.answersVisible,
           wanted: widget.answerWidth,
+          explicit: widget.explicit,
         );
         final stepGutter = m.tight ? 0.0 : 30.0; // finger-sized on a desktop
         final gutterW = m.gutter;

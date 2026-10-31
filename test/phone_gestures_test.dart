@@ -72,8 +72,18 @@ Future<void> back(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 60));
 }
 
-double dividerCentre(WidgetTester tester) =>
-    tester.getRect(find.byKey(const ValueKey('answer-divider'))).center.dx;
+/// The rule itself: the 44dp band around it leans towards the answers, the 1px
+/// hairline is what the column is measured by.
+double dividerCentre(WidgetTester tester) => tester
+    .getCenter(
+      find.descendant(
+        of: find.byKey(const ValueKey('answer-divider')),
+        matching: find.byWidgetPredicate(
+          (w) => w is Container && w.constraints?.maxWidth == 1,
+        ),
+      ),
+    )
+    .dx;
 
 bool canPop(WidgetTester tester) {
   // PopScope is generic, so byType() matches nothing
