@@ -1,11 +1,11 @@
-; Tallynote installer (Inno Setup 6).
+; Numbook installer (Inno Setup 6).
 ; Build:  ISCC /DAppVersion=0.2.2 packaging\windows\tallynote.iss
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
-#define AppName "Tallynote"
+#define AppName "Numbook"
 #define AppPublisher "KinFx"
-#define AppURL "https://github.com/Kinfxhk/tallynote"
+#define AppURL "https://github.com/Kinfxhk/numbook"
 #define ExeName "tallynote.exe"
 
 [Setup]
