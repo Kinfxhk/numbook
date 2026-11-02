@@ -14,7 +14,7 @@
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
-  <base href="/tallynote/">
+  <base href="/numbook/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
@@ -28,13 +28,13 @@
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="tallynote">
+  <meta name="apple-mobile-web-app-title" content="numbook">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>Tallynote</title>
+  <title>Numbook</title>
   <link rel="manifest" href="manifest.json">
 
   <!-- Start the 1.2 MB app download before the bootstrap is parsed, so the
@@ -77,7 +77,7 @@
 </head>
 <body>
   <div id="tn-boot" role="status" aria-live="polite">
-    <div class="tn-mark">Tallynote</div>
+    <div class="tn-mark">Numbook</div>
     <div class="tn-bar"><i></i></div>
     <div class="tn-hint">載入中…</div>
   </div>
@@ -114,13 +114,13 @@
     })();
   </script>
   <script>
-    // Tallynote's own worker: Flutter's generated one unregisters itself, and
+    // Numbook's own worker: Flutter's generated one unregisters itself, and
     // an offline notepad must still open with the network unplugged.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker
           .register(new URL('service_worker.js', document.baseURI))
-          .catch(function (e) { console.warn('tallynote: no offline cache', e); });
+          .catch(function (e) { console.warn('numbook: no offline cache', e); });
       });
       // The worker answers the shell from cache, so ask it once the app is up
       // whether a newer deploy exists. If one does it refreshes the cache and

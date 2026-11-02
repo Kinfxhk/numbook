@@ -42,7 +42,7 @@ _flutter.buildConfig = {"engineRevision":"89c39edfdfae2949f6806e4a315c0c08522238
 
 
 // Flutter's generated service worker unregisters itself on activate, which
-// would leave the app needing the network on every open. Tallynote registers
+// would leave the app needing the network on every open. Numbook registers
 // its own worker in index.html, so the loader must not install a second one.
 _flutter.loader.load({
   serviceWorkerSettings: {
