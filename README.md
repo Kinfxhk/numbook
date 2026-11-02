@@ -1,4 +1,4 @@
-# Tallynote · 記事計算機
+# Numbook · 記事計數簿
 
 **The notepad that adds up.** Every line you type is a calculation; the answer sits on the right, aligned by its decimal point.
 **識計數嘅記事簿。** 打一行字就計一次，答案排喺右邊，小數點自動對齊。
@@ -6,12 +6,12 @@
 Offline first: nothing is computed in the cloud, and the page works with the network unplugged.
 離線優先：唔經雲端計算，拔咗網線都照用。
 
-**[Open the web app · 開網頁版](https://kinfxhk.github.io/tallynote/)** · **[All downloads · 全部下載](https://github.com/Kinfxhk/tallynote/releases/latest)** · **[Buy Me a Coffee](https://buymeacoffee.com/kinfxhk)**
+**[Open the web app · 開網頁版](https://kinfxhk.github.io/numbook/)** · **[All downloads · 全部下載](https://github.com/Kinfxhk/numbook/releases/latest)** · **[Buy Me a Coffee](https://buymeacoffee.com/kinfxhk)**
 
-The web app is installable: in Chrome or Edge, **Install Tallynote** puts it in the Dock and it opens with the network unplugged. Notes are stored on the device, and closing the tab never loses the last line — the status bar shows *editing…* until the write lands.
-網頁版可以安裝：Chrome／Edge 揀「安裝 Tallynote」就入 Dock，離線都開得。資料存喺本機，關 tab 唔會蝕最後一行 —— 狀態欄會顯示 *editing…* 直到寫入完成。
+The web app is installable: in Chrome or Edge, **Install Numbook** puts it in the Dock and it opens with the network unplugged. Notes are stored on the device, and closing the tab never loses the last line — the status bar shows *editing…* until the write lands.
+網頁版可以安裝：Chrome／Edge 揀「安裝 Numbook」就入 Dock，離線都開得。資料存喺本機，關 tab 唔會蝕最後一行 —— 狀態欄會顯示 *editing…* 直到寫入完成。
 
-<img src="docs/screenshot-desktop-zh.png" alt="Tallynote desktop: a monthly budget note with answers aligned on the decimal point">
+<img src="docs/screenshot-desktop-zh.png" alt="Numbook desktop: a monthly budget note with answers aligned on the decimal point">
 
 ## Interface · 介面
 
@@ -22,8 +22,8 @@ The web app is installable: in Chrome or Edge, **Install Tallynote** puts it in 
 - **Header · 頂欄** — exactly two buttons: sheets menu and settings. Every switch lives in a tabbed settings dialog (Appearance / Editor / Data / Cheat sheet). / 只有兩個掣：記事選單同設定；所有開關收喺分頁設定（外觀／編輯／資料／計算表）。
 
 <p>
-<img src="docs/screenshot-desktop-en-dark.png" width="49%" alt="Tallynote dark theme in English: Tokyo trip note with tagged totals">
-<img src="docs/screenshot-mobile.png" width="24%" alt="Tallynote on a phone: same note, answers still aligned">
+<img src="docs/screenshot-desktop-en-dark.png" width="49%" alt="Numbook dark theme in English: Tokyo trip note with tagged totals">
+<img src="docs/screenshot-mobile.png" width="24%" alt="Numbook on a phone: same note, answers still aligned">
 </p>
 
 Dark theme, English interface and a phone layout are the same build — three languages (English / 繁體中文 / 简体中文) ship in the app and follow the system locale.
@@ -141,12 +141,15 @@ sum                            →  -520,000
 | Windows (portable) | `tallynote-windows.zip` | unzip and run `tallynote.exe` · 解壓即用 |
 | Linux | `tallynote_<version>_amd64.deb` | installs to `/usr/lib/tallynote` with a desktop entry · 裝到 `/usr/lib/tallynote` 並加桌面捷徑 |
 | Linux (portable) | `tallynote-linux.tar.gz` | unpack and run `bundle/tallynote` · 解壓即用 |
-| Web | [kinfxhk.github.io/tallynote](https://kinfxhk.github.io/tallynote/) | deployed from `main`, installable as a PWA · 由 `main` 部署，可安裝成 PWA |
+| Web | [kinfxhk.github.io/numbook](https://kinfxhk.github.io/numbook/) | deployed from `main`, installable as a PWA · 由 `main` 部署，可安裝成 PWA |
 | macOS / iOS | not yet · 未有 | needs a full Xcode install · 要完整 Xcode |
 | Linux / Windows arm64 | not yet · 未有 | Flutter publishes no arm64 host SDK (flutter/flutter#114349) · Flutter 未有 arm64 host SDK |
 
 Every release also ships `SHA256SUMS.txt`; the version is in the file names above as `<version>`.
 每個 release 都附 `SHA256SUMS.txt`；上面 `<version>` 位置就係版本號。
+
+Binary names still carry the old `tallynote` prefix (installer, `.deb` package, executable) on purpose: renaming them breaks the sign-in/update path of existing installs, so they change in one coordinated packaging pass, not here.
+執行檔名仍然沿用舊 `tallynote` 前綴（安裝程式、`.deb` 包名、執行檔）：改名會斷開現有安裝同更新路徑，所以留到下一次整體打包改動才處理。
 
 ## From the command line · 命令列
 
@@ -175,7 +178,7 @@ flutter pub get
 flutter test
 flutter run -d android     # or linux, windows, chrome
 flutter build apk --release
-flutter build web --release --base-href /tallynote/ --no-web-resources-cdn
+flutter build web --release --base-href /numbook/ --no-web-resources-cdn
 ```
 
 Windows needs the **Desktop development with C++** workload:

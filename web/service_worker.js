@@ -1,4 +1,4 @@
-// Tallynote's own service worker. Flutter's generated one unregisters itself,
+// Numbook's own service worker. Flutter's generated one unregisters itself,
 // and a notepad that needs the network to open is not offline.
 //
 // Online, the worker deliberately does not answer anything: a response the
@@ -17,7 +17,7 @@
 // canvaskit/chromium/*, not canvaskit/*, and the app dies on the missing module
 // (a real offline boot failed on exactly that file). Bump CACHE whenever
 // PRECACHE changes.
-const CACHE = 'tallynote-v6';
+const CACHE = 'numbook-v1';
 
 // Best effort: one missing file must not fail the whole install.
 const PRECACHE = [

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Tallynote
+Name=Numbook
 GenericName=Notepad calculator
 Comment=The notepad that adds up
 Exec=tallynote

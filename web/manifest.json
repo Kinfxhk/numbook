@@ -1,6 +1,6 @@
 {
-    "name": "Tallynote — the notepad that adds up",
-    "short_name": "Tallynote",
+    "name": "Numbook — 記事計數簿",
+    "short_name": "Numbook",
     "start_url": ".",
     "scope": ".",
     "display": "standalone",
