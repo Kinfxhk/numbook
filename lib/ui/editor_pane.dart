@@ -323,6 +323,12 @@ class EditorPane extends StatelessWidget {
         final hasAnswers = pane.results.any(
           (r) => r.display != null || r.engineError,
         );
+        // Same width the editor measures, so the drag handle and the gutter
+        // agree once two-digit numbers widen a phone's column.
+        final numbered = showLineNumbers ? pane.results.length : 0;
+        final numberWidth = numbered == 0
+            ? 0.0
+            : lineNumberWidth(context, numbered);
         // An empty note's column is narrower (see editorMetrics); tweening it
         // keeps the first answer from snapping the text sideways.
         final em = editorMetrics(
@@ -331,6 +337,7 @@ class EditorPane extends StatelessWidget {
           wanted: pane.answerW,
           hasAnswers: hasAnswers,
           explicit: pane.explicitW,
+          numberWidth: numberWidth,
         );
         final target = em.answerW;
         // a finger needs a 44dp handle; a mouse keeps the old 10dp feel
@@ -352,6 +359,7 @@ class EditorPane extends StatelessWidget {
               answersVisible: answersVisible,
               wanted: w,
               explicit: pane.explicitW,
+              numberWidth: numberWidth,
             );
             return Stack(
               children: [
