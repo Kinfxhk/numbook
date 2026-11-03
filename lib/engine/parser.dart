@@ -309,9 +309,12 @@ class Parser {
         left = BinNode('/', left, _unary());
       } else if ((_isOp('%') && _numberFollows()) ||
           _matchAnyWords(const [['mod'], ['modulo']]) ||
-          _matchWords(const ['餘'])) {
+          _matchWords(const ['餘']) ||
+          _matchWords(const ['余'])) {
         // "7 % 2" / "10 mod 3": a percent sign with a number after it is a
         // remainder, not a percentage. "200 + 10%" has nothing after it.
+        // 余 is simplified 餘. The lexer keeps a longer word (余额) intact,
+        // so this only fires on the operator itself.
         if (_isOp('%')) _p++;
         left = BinNode('%', left, _unary());
       } else if (cur?.type == TokType.lparen) {
@@ -356,7 +359,7 @@ class Parser {
       if (c.type == TokType.word) {
         final w = c.text.toLowerCase();
         // "10 mod 3" belongs to the multiplicative level, not to a unit name.
-        if (w == 'mod' || w == 'modulo' || w == '餘') break;
+        if (w == 'mod' || w == 'modulo' || w == '餘' || w == '余') break;
         // conversion: "in" / "to" / "as" / "兌" followed by a unit
         if (isConversionWord(w)) {
           final save = _p;
@@ -369,8 +372,9 @@ class Parser {
           _p = save;
           break;
         }
-        // "5% of 200", "5%的200", "5%嘅200"
-        if ((w == 'of' || w == '的' || w == '嘅') && node is PercentNode) {
+        // "5% of 200", "5%的200", "5%嘅200", "5%の200", "5%의 200"
+        if ((w == 'of' || w == '的' || w == '嘅' || w == 'の' || w == '의') &&
+            node is PercentNode) {
           _p++;
           node = PercentOfNode(node.operand, _unary());
           continue;
@@ -387,8 +391,8 @@ class Parser {
           }
           break;
         }
-        // "200的5%" / "200嘅百分之5" — the base comes first.
-        if (w == '的' || w == '嘅') {
+        // "200的5%" / "200嘅百分之5" / "200の10%" / "200의 10%" — base first.
+        if (w == '的' || w == '嘅' || w == 'の' || w == '의') {
           final save = _p;
           _p++;
           final amount = _takePercentAmount();
@@ -427,7 +431,13 @@ class Parser {
     final key = c.text.toLowerCase();
     // "200的百分之5" is one CJK word plus a number. It must stay a word so
     // the percent postfix can see it, not a made-up unit named 的百分之.
-    if (allowDynamic && !_reserved.contains(key) && !key.contains('百分之')) {
+    // の / 의 are percent particles. A longer word that merely starts with
+    // one (`100の八割`) is not a unit either: 八割 is not 八折.
+    if (allowDynamic &&
+        !_reserved.contains(key) &&
+        !key.contains('百分之') &&
+        !key.startsWith('の') &&
+        !key.startsWith('의')) {
       _p++;
       return Unit(c.text, {key: 1}, 1);
     }
@@ -469,7 +479,11 @@ class Parser {
     '除去',
     '的',
     '嘅',
+    'の',
+    '의',
     '百分之',
+    '餘',
+    '余',
     'multiplied',
     'divided',
     'over',
@@ -564,7 +578,7 @@ class Parser {
       final isMod =
           peek != null &&
           peek.type == TokType.word &&
-          const {'mod', 'modulo', '餘'}.contains(peek.text.toLowerCase());
+          const {'mod', 'modulo', '餘', '余'}.contains(peek.text.toLowerCase());
       // currency word before number: "USD 100"
       var unit = isMod ? null : _readUnit(allowDynamic: true);
       if (unit == null) {

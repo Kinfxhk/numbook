@@ -199,6 +199,10 @@ void main() {
     expect(one('5 加 上 3'), '8');
     expect(one('10 減 去 4'), '6');
     expect(one('10 减 去 4'), '6');
+    expect(one('10减4'), '6');
+    expect(one('10减去4'), '6');
+    expect(one('100 减去 30'), '70');
+    expect(one('1100减30'), '1,070');
     expect(one('30 乘 以 3'), '90');
     expect(one('100加10%'), '110');
     expect(one('100減10%'), '90');
@@ -334,6 +338,79 @@ void main() {
     expect(strict.evaluate(['午餐 120']).first.display, isNull);
     // the forgiving default still answers prose with its number
     expect(engine.evaluate(['午餐 120']).first.display, '120');
+  });
+
+  test('simplified, japanese, and korean formula aliases', () {
+    expect(one('7余2'), '1');
+    expect(one('7 余 2'), '1');
+    expect(one('10余3'), '1');
+    expect(one('7餘2'), '1');
+    expect(one('100余'), '100');
+    expect(one('余额 500'), '500');
+
+    const head = ['2000 + 3000', '100/2', '4300*2', '6+3x30+30'];
+    final traditional = engine.evaluate([...head, '合共']).last.display;
+    expect(traditional, '13,776');
+    for (final word in ['合计', '总共', '总计', '总和', '總共', '總計', '總和']) {
+      expect(
+        engine.evaluate([...head, word]).last.display,
+        traditional,
+        reason: word,
+      );
+    }
+    // A line that already states the total must not be added again.
+    final stated = engine.evaluate(['10', '20', '合计: 30', '总和']);
+    expect(stated[2].display, '30');
+    expect(stated.last.display, '30');
+
+    const share = '126.666666667';
+    for (final line in [
+      '分帳 3 人 380',
+      '分账 3 人 380',
+      '分账3人380',
+      '380 分账 3 人',
+      '380 分 3 人',
+      '380 分 3 份',
+      '夾錢 3 人 380',
+      '攤分 3 人 380',
+      'split 3 人 380',
+      '割り勘 3人 380',
+      '割り勘 3人で 380',
+      '380 割り勘 3人',
+      '3人で割り勘 380',
+      '380を3人で割り勘',
+      '더치페이 3명 380',
+      '엔빵 3명 380',
+      '380 엔빵 3명',
+      '3명 엔빵 380',
+      '3명으로 엔빵 380',
+      '380을 3명 엔빵',
+    ]) {
+      expect(one(line), share, reason: line);
+    }
+    expect(one(r'$300 더치페이 2명'), r'$150.00');
+    expect(one(r'$300 分 2 人'), r'$150.00');
+
+    expect(one('200の10%'), '20');
+    expect(one('200 の 10%'), '20');
+    expect(one('15%の300'), '45');
+    expect(one('15% の 300'), '45');
+    expect(one(r'HK$200の10%'), r'HK$20.00');
+    expect(one('10%の50%'), '5%');
+    expect(one('200의10%'), '20');
+    expect(one('200의 10%'), '20');
+    expect(one('15%의 300'), '45');
+    expect(one(r'HK$200의 10%'), r'HK$20.00');
+    expect(one('10%의50%'), '5%');
+
+    // Traditional percent wording is unchanged.
+    expect(one('200的5%'), '10');
+    expect(one('5%的200'), '10');
+    expect(one('20是80的百分之幾'), '25%');
+    expect(one('20係80嘅百分之几'), '25%');
+    expect(one('打八折 100'), '80');
+    expect(one('100 打八折'), '80');
+    expect(one('八五折 200'), '170');
   });
 
   test('text lines stay quiet', () {
