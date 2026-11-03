@@ -11,11 +11,26 @@ import 'answer_column.dart';
 import 'feedback.dart';
 import 'theme.dart';
 
+/// Fold chevron column. The digits sit beside it, so a number is never
+/// drawn underneath the arrow.
+const _foldSlot = 14.0;
+
+/// Space between the line number and the first glyph of the line.
+const _numberGap = 10.0;
+
+/// Spare pixel so a glyph that rounds up does not wrap onto a second line.
+const _numberSlack = 1.0;
+
+/// The face the gutter paints. Width measurement must use this same face.
+const _lineNumberFace = TextStyle(fontFamily: monoFamily, fontSize: 11);
+
 /// How much room an editor gives its own chrome at a given pane width.
 ///
-/// One pane's width decides the gutter, the side padding and the widest answer
-/// column that still leaves the text 200px. The split's drag handle measures
-/// with this too, so the rule and the handle's x cannot drift apart.
+/// One pane's width decides the side padding and the widest answer column
+/// that still leaves the text 200px. The gutter starts from that same width,
+/// then grows once the line numbers no longer fit beside the fold chevron.
+/// The answer column gives up the extra room. The split's drag handle
+/// measures with this too, so the rule and the handle's x cannot drift apart.
 class EditorMetrics {
   /// One side of the horizontal padding.
   final double padH;
@@ -41,16 +56,34 @@ class EditorMetrics {
   });
 }
 
+/// Painted width of line number [lineCount], in the gutter's own face.
+///
+/// The test font and a phone's monospace are not the same width, so the
+/// gutter asks the painter instead of assuming a digit is 7px.
+double lineNumberWidth(BuildContext context, int lineCount) {
+  final n = lineCount < 1 ? 1 : lineCount;
+  final style = DefaultTextStyle.of(context).style.merge(_lineNumberFace);
+  final painter = TextPainter(
+    text: TextSpan(text: '$n', style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
 EditorMetrics editorMetrics({
   required double width,
   required bool answersVisible,
   required double wanted,
   bool hasAnswers = true,
   bool explicit = false,
+  double numberWidth = 0,
 }) {
   final tight = width < 560;
   final padH = tight ? 12.0 : 24.0;
-  final gutter = tight ? 32.0 : 54.0;
+  final gutter = _gutterWidth(tight, numberWidth);
   // The answer column shrinks before the text does: a phone still needs a
   // readable line, and a scaled-down number beats a two-word-wide column.
   final room = math.max(0.0, width - gutter - padH * 2 - 200);
@@ -69,6 +102,21 @@ EditorMetrics editorMetrics({
     tight: tight,
     cap: cap,
   );
+}
+
+/// Base gutter, widened when [numberWidth] does not fit in it.
+///
+/// A phone reserves 32. Fourteen of that is the fold chevron and ten is the
+/// gap before the text, which leaves the digits 8px. A single figure fits.
+/// "10" does not: it wraps, and the second digit drops onto the line below.
+/// A desktop's 54 already holds several digits; it grows only when a note
+/// is long enough to need it.
+double _gutterWidth(bool tight, double numberWidth) {
+  final base = tight ? 32.0 : 54.0;
+  if (numberWidth <= 0) return base;
+  final slot = base - _foldSlot - _numberGap;
+  if (numberWidth + _numberSlack <= slot) return base;
+  return (_foldSlot + numberWidth + _numberGap + _numberSlack).ceilToDouble();
 }
 
 /// A single text field with answers aligned to each logical line.
@@ -224,11 +272,13 @@ class _EditorViewState extends State<EditorView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final numbered = widget.showLineNumbers ? widget.results.length : 0;
         final m = editorMetrics(
           width: constraints.maxWidth,
           answersVisible: widget.answersVisible,
           wanted: widget.answerWidth,
           explicit: widget.explicit,
+          numberWidth: numbered == 0 ? 0.0 : lineNumberWidth(context, numbered),
         );
         final stepGutter = m.tight ? 0.0 : 30.0; // finger-sized on a desktop
         final gutterW = m.gutter;
@@ -270,7 +320,7 @@ class _EditorViewState extends State<EditorView> {
                     Positioned(
                       top: (tops.length > i ? tops[i] : 0) + 6,
                       left: 0,
-                      width: gutterW - 10,
+                      width: gutterW - _numberGap,
                       // tap picks the whole line, a long press folds it —
                       // the same verb as the chevron, on the number
                       child: GestureDetector(
@@ -279,15 +329,15 @@ class _EditorViewState extends State<EditorView> {
                         onLongPress: () => _foldLine(i),
                         child: Row(
                           children: [
-                            SizedBox(width: 14, child: _foldArrow(i)),
+                            SizedBox(width: _foldSlot, child: _foldArrow(i)),
                             Expanded(
                               child: Text(
                                 '${i + 1}',
                                 key: ValueKey('gutter-${i + 1}'),
                                 textAlign: TextAlign.right,
-                                style: TextStyle(
-                                  fontFamily: monoFamily,
-                                  fontSize: 11,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: _lineNumberFace.copyWith(
                                   color: Palette.faint(widget.dark)
                                       .withValues(alpha: 0.55),
                                 ),

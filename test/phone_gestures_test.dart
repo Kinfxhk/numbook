@@ -154,8 +154,22 @@ void main() {
       await tester.pump(const Duration(milliseconds: 60));
       await tester.pump(const Duration(milliseconds: 300));
 
-      // 390 - (134 + 12): the answer restores the saved width, capped by room
-      expect(dividerCentre(tester), closeTo(390 - 146, 1));
+      // The answer restores the saved width, capped by the room the gutter
+      // leaves. A digit that does not fit in 8px widens that gutter, so the
+      // x comes from the same measurement the pane uses.
+      final m = editorMetrics(
+        width: phone.width,
+        answersVisible: true,
+        wanted: 212,
+        numberWidth: lineNumberWidth(
+          tester.element(find.byType(EditorView)),
+          1,
+        ),
+      );
+      expect(
+        dividerCentre(tester),
+        closeTo(phone.width - (m.answerW + m.padH), 1),
+      );
     });
   });
 
