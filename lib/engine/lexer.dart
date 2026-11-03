@@ -339,6 +339,9 @@ class Lexer {
   static bool _isCjk(String c) {
     final code = c.codeUnitAt(0);
     return (code >= 0x4E00 && code <= 0x9FFF) ||
-        (code >= 0x3040 && code <= 0x30FF);
+        (code >= 0x3040 && code <= 0x30FF) ||
+        // Hangul syllables, so 의 / 더치페이 / 엔빵 are words rather than
+        // a run of stray operator characters.
+        (code >= 0xAC00 && code <= 0xD7AF);
   }
 }

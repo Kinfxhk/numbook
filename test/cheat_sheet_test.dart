@@ -38,6 +38,26 @@ void main() {
     }
   });
 
+  test('simplified total words are on the sheet and equal 合共', () {
+    const words = ['合计', '总共', '总计', '总和'];
+    final listed = [
+      for (final group in cheatSheet)
+        for (final row in group.rows) row.input,
+    ];
+    final engine = SheetEngine(now: DateTime(2026, 10, 31, 9));
+    const head = ['12 + 30', '100'];
+    final expected = engine.evaluate([...head, '合共']).last.display;
+    expect(expected, '142');
+    for (final word in words) {
+      expect(listed, contains(word), reason: word);
+      expect(
+        engine.evaluate([...head, word]).last.display,
+        expected,
+        reason: word,
+      );
+    }
+  });
+
   test('every group has a title key and at least one row', () {
     expect(cheatSheet, isNotEmpty);
     for (final group in cheatSheet) {
