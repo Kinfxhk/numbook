@@ -581,6 +581,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           ? 'zh_Hans'
           : 'zh_Hant';
     }
+    if (sys.languageCode == 'ja') return 'ja';
+    if (sys.languageCode == 'ko') return 'ko';
     return 'en';
   }
 
@@ -593,6 +595,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       languageCode: 'zh',
       scriptCode: 'Hans',
     ),
+    'ja' => const Locale('ja'),
+    'ko' => const Locale('ko'),
     _ => const Locale('en'),
   };
 
@@ -752,6 +756,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
         Locale('en'),
         Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
         Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+        Locale('ja'),
+        Locale('ko'),
       ],
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
