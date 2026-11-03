@@ -122,6 +122,22 @@ void main() {
     expect(one('八五折 200'), '170');
     expect(one('九五折 100'), '95');
     expect(one(r'打七折 $200'), r'$140.00');
+    // 八割引 is "80% off" (pay 20), the opposite of 八折 (pay 80). The 折
+    // inside it is not a discount trigger, with or without a space.
+    // A hanzi prefix is ordinary prose, so the price stands. A leading
+    // digit cannot be skipped (`2割引`), so that line has no answer at all.
+    expect(one('八割引 100'), '100');
+    expect(one('2割引 100'), isNull);
+    expect(one('95割引 100'), isNull);
+    expect(one('八五割引 100'), '100');
+    expect(one('打八割引 100'), '100');
+    expect(one('八折 引100'), '100');
+    // A trailing 割引 is not an operator, so it stays a word on the number
+    // and the price is not reduced.
+    expect(one('100八割引'), '100 八割引');
+    expect(one('100の八割'), '100');
+    expect(one('20%オフ 100'), isNull);
+    expect(one('할인 100'), '100');
   });
 
   test('splitting a bill', () {
