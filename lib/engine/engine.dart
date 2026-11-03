@@ -49,6 +49,11 @@ class SheetEngine {
     '總共',
     '總計',
     '總和',
+    // Simplified forms of the same totals.
+    '合计',
+    '总共',
+    '总计',
+    '总和',
     '加埋',
     '全部加埋',
     '全計',
@@ -323,7 +328,7 @@ class SheetEngine {
     if (i <= 0) return false;
     final label = body.substring(0, i).toLowerCase();
     if (!RegExp(r'[a-z\u4e00-\u9fff]').hasMatch(label)) return false;
-    return RegExp(r'total|subtotal|net\b|balance|合計|小計|總計|總額|淨|結餘')
+    return RegExp(r'total|subtotal|net\b|balance|合計|小計|總計|總額|淨|結餘|合计|总共|总计|总和')
         .hasMatch(label);
   }
 
@@ -511,19 +516,41 @@ class SheetEngine {
       }
     }
 
-    // Splitting a bill: 分帳 3 人 380 / 380 分 3 人. Cantonese notes write it
-    // either way round; both mean one share.
-    final split = RegExp(
-      r'^(?:分帳|夾錢|攤分|split)\s*(\d{1,3})\s*人\s*(.+)$',
+    // Splitting a bill, one share. The traditional forms stay:
+    //   分帳 3 人 380 / 380 分 3 人 / 夾錢 / 攤分 / split
+    // Plus the same shape in the other languages:
+    //   分账 3 人 380 / 割り勘 3人 380 / 3人で割り勘 380 / 380を3人で割り勘
+    //   더치페이 3명 380 / 3명 엔빵 380 / 380을 3명 엔빵
+    // A particle (で / 으로 / 로 / 을 / を) is only accepted in these fixed
+    // frames. A looser sentence is left unanswered.
+    const splitVerb = '分帳|分账|夾錢|攤分|split|割り勘|더치페이|엔빵';
+    const splitCounter = '人|명';
+    const splitParticle = 'で|으로|로';
+    final splitLead = RegExp(
+      '^(?:$splitVerb)\\s*(\\d{1,3})\\s*(?:$splitCounter)\\s*(?:$splitParticle)?\\s*(.+)\$',
     ).firstMatch(body);
-    final splitTail = split == null
-        ? RegExp(r'^(.+?)\s*(?:分|除)\s*(\d{1,3})\s*(?:人|份)$').firstMatch(body)
+    final splitPeopleFirst = splitLead == null
+        ? RegExp(
+            '^(\\d{1,3})\\s*(?:$splitCounter)\\s*(?:$splitParticle)?\\s*(?:割り勘|더치페이|엔빵)\\s*(.+)\$',
+          ).firstMatch(body)
         : null;
-    if (split != null || splitTail != null) {
-      final people = int.parse(
-        (split ?? splitTail)!.group(split != null ? 1 : 2)!,
-      );
-      final amountText = (split ?? splitTail)!.group(split != null ? 2 : 1)!;
+    final splitTail = splitLead == null && splitPeopleFirst == null
+        ? RegExp(
+            '^(.+?)\\s*(?:分账|分帳|割り勘|더치페이|엔빵|分|除)\\s*(\\d{1,3})\\s*(?:人|份|명)\$',
+          ).firstMatch(body)
+        : null;
+    // 380を3人で割り勘 / 380을 3명 엔빵. Amount first, verb last.
+    final splitObject =
+        splitLead == null && splitPeopleFirst == null && splitTail == null
+        ? (RegExp(r'^(.+?)を\s*(\d{1,3})\s*人で\s*割り勘$').firstMatch(body) ??
+              RegExp(r'^(.+?)을\s*(\d{1,3})\s*명(?:이)?\s*(?:더치페이|엔빵)$')
+                  .firstMatch(body))
+        : null;
+    final matched = splitLead ?? splitPeopleFirst ?? splitTail ?? splitObject;
+    if (matched != null) {
+      final peopleFirst = splitLead != null || splitPeopleFirst != null;
+      final people = int.parse(matched.group(peopleFirst ? 1 : 2)!);
+      final amountText = matched.group(peopleFirst ? 2 : 1)!;
       final amount = _parseValue(
         amountText.trim(),
         ctx,
@@ -535,7 +562,9 @@ class SheetEngine {
         if (amount is MoneyValue) {
           return MoneyValue(amount.value / people, amount.currency);
         }
-        if (amount is NumValue) return NumValue(amount.value / people, amount.unit);
+        if (amount is NumValue) {
+          return NumValue(amount.value / people, amount.unit);
+        }
       }
       return null;
     }
@@ -960,6 +989,10 @@ class SheetEngine {
   ///
   /// A bare number before 折 is read the Chinese way (8折 = 80%), while 95折
   /// keeps its 95. Nothing else is guessed: no amount, no answer.
+  ///
+  /// Japanese N割引 is "N×10 percent off" — 八割引 pays 20%, the opposite of
+  /// 八折. The 折 inside 割引 is not this rule, spaced or not (`八割引`,
+  /// `八折 引`). Those lines stay ordinary prose.
   Value? _zhDiscount(
     String body,
     EvalContext ctx, {
@@ -1012,12 +1045,14 @@ class SheetEngine {
     }
 
     const numeral = r'([0-9]+(?:\.[0-9]+)?|[一二三四五六七八九]{1,2})';
-    final prefix = RegExp('^(?:打)?\\s*$numeral\\s*折\\s*(?:價|錢)?\\s*(.+)\$')
+    // `(?!引)` keeps 割引 from matching 折. A space (`八折 引100`) is the
+    // same word, so an amount that starts with 引 is refused too.
+    final prefix = RegExp('^(?:打)?\\s*$numeral\\s*折(?!引)\\s*(?:價|錢)?\\s*(.+)\$')
         .firstMatch(body);
-    if (prefix != null) {
+    if (prefix != null && !prefix.group(2)!.trimLeft().startsWith('引')) {
       return apply(prefix.group(2)!, prefix.group(1)!);
     }
-    final suffix = RegExp('^(.+?)\\s*(?:打)?\\s*$numeral\\s*折\$')
+    final suffix = RegExp('^(.+?)\\s*(?:打)?\\s*$numeral\\s*折(?!引)\$')
         .firstMatch(body);
     if (suffix != null) {
       return apply(suffix.group(1)!, suffix.group(2)!);
