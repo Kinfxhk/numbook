@@ -50,10 +50,6 @@ const cheatSheet = <CheatGroup>[
     CheatRow('0.5 as percentage', '50%'),
     CheatRow('打八折 100', '80'),
     CheatRow('100 打八折', '80'),
-    CheatRow('200の10%', '20'),
-    CheatRow('15%の200', '30'),
-    CheatRow('200의 10%', '20'),
-    CheatRow('15%의 200', '30'),
   ]),
   CheatGroup('cheatTotals', [
     CheatRow('sum'),
@@ -101,9 +97,6 @@ const cheatSheet = <CheatGroup>[
     CheatRow('10减去4', '6'),
     CheatRow('分帳 3 人 380', '126.666666667'),
     CheatRow('分账 3 人 380', '126.666666667'),
-    CheatRow('割り勘 3人 380', '126.666666667'),
-    CheatRow('더치페이 3명 380', '126.666666667'),
-    CheatRow('엔빵 3명 380', '126.666666667'),
   ]),
 ];
 
