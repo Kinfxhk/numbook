@@ -39,6 +39,13 @@ void main() {
     expect(T.of('zh_Hans', 'newSheet'), '新笔记');
     expect(T.of('ja', 'newSheet'), '新しいシート');
     expect(T.of('ko', 'newSheet'), '새 시트');
+    expect(T.of('zh_Hant', 'notTallynote'), '不是 Tallynote 檔案');
+    expect(T.of('zh_Hant', 'noMatches'), '沒有符合結果');
+    expect(
+      T.of('zh_Hant', 'privacy'),
+      '所有計算都在本機完成。只有匯率會用網絡，而且只在過期時。',
+    );
+    expect(T.of('zh_Hant', 'themeHint'), '跟隨手機，或自己選');
     expect(
       T.format('zh_Hant', 'linesAnswers', {'lines': '3', 'answers': '2'}),
       '3 行 · 2 個答案',
