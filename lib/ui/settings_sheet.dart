@@ -434,11 +434,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   : Palette.faint(dark),
             ),
             child: Text(
-              switch (entry.key) {
-                'zh_Hant' => '繁',
-                'zh_Hans' => '简',
-                _ => 'EN',
-              },
+              T.switchLabel[entry.key] ?? entry.key,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: locale == entry.key
