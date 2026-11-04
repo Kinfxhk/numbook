@@ -39,7 +39,7 @@ void main() {
     expect(T.of('zh_Hans', 'newSheet'), '新笔记');
     expect(T.of('ja', 'newSheet'), '新しいシート');
     expect(T.of('ko', 'newSheet'), '새 시트');
-    expect(T.of('zh_Hant', 'notTallynote'), '不是 Tallynote 檔案');
+    expect(T.of('zh_Hant', 'notTallynote'), '不是 Numbook 檔案');
     expect(T.of('zh_Hant', 'noMatches'), '沒有符合結果');
     expect(
       T.of('zh_Hant', 'privacy'),

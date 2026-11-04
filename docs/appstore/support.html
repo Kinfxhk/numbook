@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Numbook — 支援 / Support</title>
+<style>
+  :root { --paper:#f7f4ef; --ink:#2a2622; --muted:#6e665c; --rule:#ded7cc; --accent:#b0552f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#1e1b22; --ink:#ece7e1; --muted:#9c93a6; --rule:#3a3446; --accent:#e0895f; }
+  }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         font: 16px/1.65 -apple-system, "Helvetica Neue", "PingFang HK", sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+  .kicker { font: 600 11px/1 ui-monospace, SFMono-Regular, monospace; letter-spacing: .16em;
+            text-transform: uppercase; color: var(--muted); margin-bottom: 1.5rem; }
+  h2 { font-size: 1rem; margin: 2.2rem 0 .4rem; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent); }
+  code { font: 13px/ui-monospace, SFMono-Regular, monospace; background: var(--rule); padding: .1em .35em; border-radius: 4px; }
+  .meta { color: var(--muted); font-size: .85rem; }
+  dt { font-weight: 600; margin-top: 1.1rem; }
+  dd { margin: .2rem 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="kicker">Numbook · support</div>
+  <h1>支援</h1>
+  <p class="meta">Numbook 0.5 · Android · macOS · Windows · Linux · Web</p>
+
+  <h2>常見問題</h2>
+  <dl>
+    <dt>為甚麼某些行沒有答案？</dt>
+    <dd>Numbook 寧願不答，也不會猜。含運算符但無法解析的行（例如 <code>4300 X 30%</code>，
+        大寫 X 不是乘號）會留空；日期格式不正確的行亦不當作算式。改成 <code>4300 * 30%</code> 就會計算。</dd>
+
+    <dt>答案怎樣加總？</dt>
+    <dd><code># 標題</code> 開新的一段，<code>total</code> 會加總該段；<code>total of #tag</code>
+        加總有該標籤的行。空白行只是間距，不會分段。</dd>
+
+    <dt>貨幣換算的匯率從哪來？</dt>
+    <dd>歐洲央行參考匯率（經 frankfurter.app）。可在設定關閉自動更新，關閉後完全離線。</dd>
+
+    <dt>記事存在哪裡？會不會上傳？</dt>
+    <dd>只存在你的裝置上，不會上傳。詳見<a href="./privacy.html">隱私政策</a>。</dd>
+
+    <dt>支援哪些平台？</dt>
+    <dd>Android、macOS、Windows、Linux 及網頁版（<a href="./index.html">離線可用</a>）。
+        各平台的計算引擎相同，答案一致。</dd>
+
+    <dt>快捷鍵（macOS）</dt>
+    <dd><code>⌘S</code> 儲存 · <code>⌘⇧X</code> 刪除線 · <code>⌘⇧S</code> 另存副本 ·
+        <code>⌘B / ⌘I / ⌘U</code> 粗體／斜體／底線 · <code>⌘F</code> 搜尋 ·
+        <code>⌘N</code> 新記事 · <code>⌘+ / ⌘- / ⌘0</code> 縮放 · <code>⌘,</code> 設定。</dd>
+  </dl>
+
+  <h2>回報問題</h2>
+  <p><a href="https://github.com/Kinfxhk/numbook/issues">GitHub Issues</a> ·
+     電郵 <a href="mailto:kinfxhk@gmail.com">kinfxhk@gmail.com</a>。
+     請附上平台、版本，以及重現步驟（一行能重現的算式最好）。</p>
+
+  <p class="meta"><a href="./index.html">← Numbook</a> · <a href="./privacy.html">隱私政策</a></p>
+</main>
+</body>
+</html>
