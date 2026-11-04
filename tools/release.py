@@ -16,8 +16,10 @@ Commands
 """
 import argparse
 import base64
+import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -45,7 +47,7 @@ def b64url(data: bytes) -> str:
 def token(c):
     now = int(time.time())
     header = {"alg": "ES256", "kid": c["key_id"], "typ": "JWT"}
-    payload = {"iss": c["issuer_id"], "iat": now, "exp": now + 1200,
+    payload = {"iss": c["issuer_id"], "iat": now - 5, "exp": now + 1200,
                "aud": "appstoreconnect-v1"}
     signing_input = (b64url(json.dumps(header, separators=(",", ":")).encode())
                      + "." + b64url(json.dumps(payload, separators=(",", ":")).encode()))
@@ -56,18 +58,29 @@ def token(c):
     return signing_input + "." + b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
 
 
-def call(c, method, path, body=None):
+def call(c, method, path, body=None, retries=3):
     url = path if path.startswith("http") else API + path
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", "Bearer " + token(c))
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read()
-            return r.status, (json.loads(raw) if raw else {})
-    except urllib.error.HTTPError as e:
-        return e.code, {"error": e.read().decode(errors="replace")[:800]}
+    last = None
+    for attempt in range(retries):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", "Bearer " + token(c))
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "numbook-release/1.0")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read()
+                return r.status, (json.loads(raw) if raw else {})
+        except urllib.error.HTTPError as e:
+            last = (e.code, {"error": e.read().decode(errors="replace")[:800]})
+            if e.code not in (429, 500, 502, 503, 504) or attempt == retries - 1:
+                return last
+        except urllib.error.URLError as e:
+            last = (0, {"error": f"network: {e.reason}"[:800]})
+            if attempt == retries - 1:
+                return last
+        time.sleep(2 ** attempt)
+    return last or (0, {"error": "call failed"})
 
 
 def builds(c, limit=5):
@@ -104,6 +117,12 @@ def cmd_status(c):
     show_builds(rows)
 
 
+def declare_compliance(c, build):
+    return call(c, "PATCH", f"/builds/{build['id']}", {
+        "data": {"type": "builds", "id": build["id"],
+                 "attributes": {"usesNonExemptEncryption": False}}})[0]
+
+
 def cmd_compliance(c):
     rows = builds(c, 10)
     todo = [b for b in rows if b["attributes"].get("usesNonExemptEncryption") is None]
@@ -111,9 +130,7 @@ def cmd_compliance(c):
         print("all builds already declared")
         return
     for b in todo:
-        st, d = call(c, "PATCH", f"/builds/{b['id']}", {
-            "data": {"type": "builds", "id": b["id"],
-                     "attributes": {"usesNonExemptEncryption": False}}})
+        st = declare_compliance(c, b)
         print(f"build {b['attributes'].get('version')}: compliance -> {st}")
 
 
@@ -129,20 +146,27 @@ def group_id(c):
     return None
 
 
+def attach_to_group(c, b):
+    """POST build b into the internal group; returns (status, body)."""
+    gid = group_id(c)
+    if not gid:
+        return None, None
+    return call(c, "POST", f"/betaGroups/{gid}/relationships/builds", {
+        "data": [{"type": "builds", "id": b["id"]}]})
+
+
 def cmd_add_to_group(c):
     b = latest_valid(c)
     if not b:
         print("no VALID build yet")
         return
-    gid = group_id(c)
-    if not gid:
-        return
-    st, d = call(c, "POST", f"/betaGroups/{gid}/relationships/builds", {
-        "data": [{"type": "builds", "id": b["id"]}]})
-    if st == 422:
-        print(f"build {b['attributes'].get('version')} already in group")
-    else:
+    st, d = attach_to_group(c, b)
+    if st is not None and 200 <= st < 300:
         print(f"added build {b['attributes'].get('version')} to group: {st}")
+    elif st in (409, 422):
+        print(f"build {b['attributes'].get('version')} already in group ({st})")
+    else:
+        print(f"add-to-group failed {st}: {d}")
 
 
 def cmd_wait(c, minutes=30):
@@ -176,6 +200,8 @@ def cmd_build(c, skip_checks=False):
         run(["flutter", "test"])
     run(["flutter", "build", "macos", "--release"])
     archive = os.path.join("build", "Numbook-asc.xcarchive")
+    if os.path.exists(os.path.join(ROOT, archive)):
+        shutil.rmtree(os.path.join(ROOT, archive))
     run(["xcodebuild", "archive",
          "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",
          "-configuration", "Release", "-archivePath", archive,
@@ -200,6 +226,7 @@ def cmd_upload(c, archive=None):
     if not arch:
         print("no .xcarchive in build/")
         return
+    print("uploading archive:", arch)
     opts = os.path.join(ROOT, "build", "exportOptions.plist")
     if not os.path.exists(opts):
         print("missing", opts)
@@ -218,40 +245,44 @@ def cmd_full(c, skip_checks=False):
     cmd_status(c)
 
 
+def parse_uploaded(ts):
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def fresh_builds(rows, now, hours=26):
+    """Builds uploaded within the last `hours` (uploadedDate is set at upload,
+    so PROCESSING builds count too)."""
+    cutoff = now - datetime.timedelta(hours=hours)
+    fresh = []
+    for b in rows:
+        when = parse_uploaded(b["attributes"].get("uploadedDate", ""))
+        if when is not None and when >= cutoff:
+            fresh.append(b)
+    return fresh
+
+
 def cmd_watch(c):
-    """Quiet daily check: only speaks when a fresh build needed action."""
-    import datetime
+    """Quiet daily check: only speaks when action was actually needed."""
     rows = builds(c, 5)
     if not rows:
         return
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=26)
-    fresh = []
-    for b in rows:
-        ts = b["attributes"].get("uploadedDate", "")
-        try:
-            when = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if when >= cutoff:
-            fresh.append(b)
-    if not fresh:
-        return
+    now = datetime.datetime.now(datetime.timezone.utc)
     acted = []
-    for b in fresh:
+    for b in fresh_builds(rows, now, hours=26):
         a = b["attributes"]
         if a.get("usesNonExemptEncryption") is None:
-            st, _ = call(c, "PATCH", f"/builds/{b['id']}", {
-                "data": {"type": "builds", "id": b["id"],
-                         "attributes": {"usesNonExemptEncryption": False}}})
+            st = declare_compliance(c, b)
             acted.append(f"build {a.get('version')}: compliance {st}")
+    # Attach regardless of freshness: the newest VALID build belongs in the
+    # group, and the POST is idempotent (duplicate -> 409/422, not reported).
     b = latest_valid(c)
     if b:
-        gid = group_id(c)
-        if gid:
-            st, _ = call(c, "POST", f"/betaGroups/{gid}/relationships/builds", {
-                "data": [{"type": "builds", "id": b["id"]}]})
-            if st == 201:
-                acted.append(f"build {b['attributes'].get('version')} added to {c['internal_group']}")
+        st, _ = attach_to_group(c, b)
+        if st is not None and 200 <= st < 300:
+            acted.append(f"build {b['attributes'].get('version')} added to {c['internal_group']}")
     if acted:
         print("Numbook release watch")
         for line in acted:
@@ -263,8 +294,11 @@ def main():
     ap.add_argument("command", choices=["status", "compliance", "add-to-group",
                                         "wait", "build", "upload", "full", "watch"])
     ap.add_argument("--skip-checks", action="store_true")
+    ap.add_argument("--archive", help="explicit .xcarchive path for upload")
     ap.add_argument("--minutes", type=int, default=30)
     a = ap.parse_args()
+    if a.skip_checks and not os.environ.get("RELEASE_ALLOW_SKIP"):
+        sys.exit("refusing --skip-checks: set RELEASE_ALLOW_SKIP=1 to override")
     c = conf()
     {
         "status": lambda: cmd_status(c),
@@ -272,7 +306,7 @@ def main():
         "add-to-group": lambda: cmd_add_to_group(c),
         "wait": lambda: cmd_wait(c, a.minutes),
         "build": lambda: cmd_build(c, a.skip_checks),
-        "upload": lambda: cmd_upload(c),
+        "upload": lambda: cmd_upload(c, a.archive),
         "full": lambda: cmd_full(c, a.skip_checks),
         "watch": lambda: cmd_watch(c),
     }[a.command]()
