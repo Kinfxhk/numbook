@@ -193,6 +193,26 @@ flutter build windows --release
 `--no-web-resources-cdn` matters: CanvasKit is served from the bundle, so opening the page touches no CDN. CI builds Android, Linux, Windows and Web on every push; the Windows `tallynote.exe` in the release was built and run natively on Windows 11.
 `--no-web-resources-cdn` 有作用：CanvasKit 由 bundle 提供，開啟頁面不會接觸 CDN。每次 push，CI 都會建置 Android、Linux、Windows、Web；release 內的 Windows `tallynote.exe` 是在 Windows 11 原生建置並運行過。
 
+## Release · 發佈（macOS App Store）
+
+`tools/release.py` 用 App Store Connect API 自動化上架流程。前置條件：
+
+1. `~/.hermes/secrets/numbook-asc/` 有 API key（p8，權限必須是 **App Manager**，在 App Store Connect › Users and Access 檢查）與 `config.json`。
+2. Xcode 已登入 Apple ID（`upload`／`full` 用 Xcode 的 session 上傳，API key 只處理 metadata 與 TestFlight）。
+3. 密鑰檔案只放本機，chmod 700 目錄／600 檔案，勿提交。
+
+```bash
+python3 tools/release.py status            # 查看最新 builds
+python3 tools/release.py build             # flutter analyze/test/build + xcodebuild archive（不上傳）
+python3 tools/release.py upload --archive build/Numbook-asc.xcarchive
+python3 tools/release.py wait              # 等最新 build 離開 PROCESSING
+python3 tools/release.py compliance        # 宣告無非豁免加密
+python3 tools/release.py add-to-group      # 最新 VALID build 加入 KinFx 內部測試群組
+python3 tools/release.py full              # build → upload → wait → compliance → add-to-group
+```
+
+每日 09:00 的 Hermes cron `numbook-release-watch` 跑 `release.py watch`：有新 build 需要宣告合規或分發時才發通知，冇事就靜默。TestFlight 安裝新 build 仍需人手在 TestFlight app 撳一下（或開啟 TestFlight 自動更新）；macOS 冇 CLI 可以代撳。
+
 ## License · 授權
 
 MIT. Tallynote is an independent implementation of the notepad-calculator idea, and is not affiliated with any commercial notepad calculator.

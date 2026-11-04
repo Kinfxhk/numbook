@@ -51,8 +51,8 @@ def token(c):
                "aud": "appstoreconnect-v1"}
     signing_input = (b64url(json.dumps(header, separators=(",", ":")).encode())
                      + "." + b64url(json.dumps(payload, separators=(",", ":")).encode()))
-    key = serialization.load_pem_private_key(
-        open(c["private_key_path"], "rb").read(), password=None)
+    with open(c["private_key_path"], "rb") as f:
+        key = serialization.load_pem_private_key(f.read(), password=None)
     der = key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256()))
     r, s = decode_dss_signature(der)
     return signing_input + "." + b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
@@ -102,10 +102,13 @@ def show_builds(rows):
 
 
 def latest_valid(c):
-    for b in builds(c, 10):
-        if b["attributes"].get("processingState") == "VALID":
-            return b
-    return None
+    valid = [b for b in builds(c, 10)
+             if b["attributes"].get("processingState") == "VALID"]
+    if not valid:
+        return None
+    # API already sorts newest-first, but do not depend on it: pick explicitly.
+    valid.sort(key=lambda b: b["attributes"].get("uploadedDate", ""), reverse=True)
+    return valid[0]
 
 
 def cmd_status(c):
