@@ -172,21 +172,47 @@ def cmd_add_to_group(c):
         print(f"add-to-group failed {st}: {d}")
 
 
-def cmd_wait(c, minutes=30):
+def pubspec_build():
+    """CFBundleVersion from pubspec (the number App Store Connect shows)."""
+    import re
+    try:
+        text = open(os.path.join(ROOT, "pubspec.yaml")).read()
+    except OSError:
+        return None
+    m = re.search(r"^version:\s*\S+\+(\d+)", text, re.M)
+    return m.group(1) if m else None
+
+
+def cmd_wait(c, minutes=30, expected=None):
+    """Wait until `expected` (or, if None, the newest build) leaves PROCESSING.
+
+    A freshly uploaded build takes minutes to appear in the API; returning on
+    the previous VALID build would silently skip the new one.
+    """
     deadline = time.time() + minutes * 60
     seen = None
     while time.time() < deadline:
-        rows = builds(c, 3)
-        if rows:
-            a = rows[0]["attributes"]
+        rows = builds(c, 5)
+        target = None
+        for b in rows:
+            if expected is None or b["attributes"].get("version") == expected:
+                target = b
+                break
+        if target is None:
+            if expected and seen != "missing":
+                seen = "missing"
+                print(f"build {expected} not visible yet, waiting…")
+        else:
+            a = target["attributes"]
             if a.get("processingState") != "PROCESSING":
                 print(f"build {a.get('version')} state {a.get('processingState')}")
-                return rows[0]
+                return target
             if seen != a.get("version"):
                 seen = a.get("version")
                 print(f"build {seen} still PROCESSING…")
         time.sleep(20)
     print("timed out waiting for processing")
+    return None
 
 
 def run(cmd, cwd=ROOT, check=True):
@@ -242,7 +268,7 @@ def cmd_upload(c, archive=None):
 def cmd_full(c, skip_checks=False):
     arch = cmd_build(c, skip_checks)
     cmd_upload(c, arch)
-    cmd_wait(c)
+    cmd_wait(c, expected=pubspec_build())
     cmd_compliance(c)
     cmd_add_to_group(c)
     cmd_status(c)
@@ -307,7 +333,7 @@ def main():
         "status": lambda: cmd_status(c),
         "compliance": lambda: cmd_compliance(c),
         "add-to-group": lambda: cmd_add_to_group(c),
-        "wait": lambda: cmd_wait(c, a.minutes),
+        "wait": lambda: cmd_wait(c, a.minutes, expected=pubspec_build()),
         "build": lambda: cmd_build(c, a.skip_checks),
         "upload": lambda: cmd_upload(c, a.archive),
         "full": lambda: cmd_full(c, a.skip_checks),
