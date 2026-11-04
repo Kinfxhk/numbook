@@ -9,5 +9,10 @@
 	     while debug builds keep working. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Open / Save a copy / Export / Print need a user-chosen destination.
+	     Without this the sandboxed (Mac App Store) build shows no save panel
+	     and every file verb fails silently, while the unsandboxed build works. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>

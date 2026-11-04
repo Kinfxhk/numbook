@@ -405,7 +405,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   Future<void> _fileMenu() async {
-    final l = LocaleScope.of(context);
+    // Read the locale from inside LocaleScope: this State's own context sits
+    // above it, so LocaleScope.of(context) silently fell back to English and
+    // the File menu stayed English while the rest of the UI was Chinese.
+    final l = LocaleScope.of(_navKey.currentContext!);
     String t(String k) => T.of(l, k);
     final choice = await showMenu<String>(
       context: _navKey.currentContext!,
