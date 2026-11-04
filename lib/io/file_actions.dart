@@ -56,9 +56,9 @@ class FileActions {
   }) async {
     final doc = await _buildPdf(sheets, engine);
     if (print) {
-      await Printing.layoutPdf(onLayout: (_) async => doc, name: 'Tallynote');
+      await Printing.layoutPdf(onLayout: (_) async => doc, name: 'Numbook');
     } else {
-      await Printing.sharePdf(bytes: doc, filename: 'tallynote.pdf');
+      await Printing.sharePdf(bytes: doc, filename: 'numbook.pdf');
     }
   }
 

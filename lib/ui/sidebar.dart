@@ -59,7 +59,7 @@ class _SidebarState extends State<Sidebar> {
             child: Row(
               children: [
                 Text(
-                  'Tallynote',
+                  'Numbook',
                   style: TextStyle(
                     fontSize: 13,
                     letterSpacing: 0.4,

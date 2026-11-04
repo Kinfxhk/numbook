@@ -749,7 +749,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     );
 
     return MaterialApp(
-      title: 'Tallynote',
+      title: 'Numbook',
       debugShowCheckedModeBanner: false,
       locale: _materialLocale,
       supportedLocales: const [
@@ -1051,7 +1051,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                     .where((x) => x.id == id)
                                     .firstOrNull;
                                 return s == null || s.title.isEmpty
-                                    ? 'Untitled'
+                                    ? T.of(LocaleScope.of(context), 'untitled')
                                     : s.title;
                               },
                               onSelect: _store.select,

@@ -48,7 +48,7 @@ class Sheet {
 
   factory Sheet.fromJson(Map<String, dynamic> j) => Sheet(
     id: j['id'] as String,
-    title: j['title'] as String? ?? 'Untitled',
+    title: j['title'] as String? ?? '',
     content: j['content'] as String? ?? '',
     folderId: j['folderId'] as String?,
     pinned: j['pinned'] as bool? ?? false,
@@ -157,7 +157,7 @@ class DocumentStore extends ChangeNotifier {
       }
     }
     if (sheets.isEmpty) {
-      sheets.add(Sheet(id: _newId(), title: 'Untitled', content: ''));
+      sheets.add(Sheet(id: _newId(), title: '', content: ''));
     }
     // drop sheets pointing at folders that no longer exist
     final ids = folders.map((f) => f.id).toSet();
@@ -207,7 +207,7 @@ class DocumentStore extends ChangeNotifier {
   Sheet create({String? folderId}) {
     final s = Sheet(
       id: _newId(),
-      title: 'Untitled',
+      title: '',
       content: '',
       folderId: folderId,
     );
@@ -265,7 +265,7 @@ class DocumentStore extends ChangeNotifier {
   void delete(String id) {
     sheets.removeWhere((s) => s.id == id);
     if (sheets.isEmpty) {
-      sheets.add(Sheet(id: _newId(), title: 'Untitled', content: ''));
+      sheets.add(Sheet(id: _newId(), title: '', content: ''));
     }
     if (activeId == id) activeId = sheets.first.id;
     notifyListeners();
