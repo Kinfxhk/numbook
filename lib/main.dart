@@ -441,8 +441,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   // ---- file verbs ---------------------------------------------------------
 
   Future<void> _openFromFile() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final l = LocaleScope.of(context);
+    final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
+    final l = LocaleScope.of(_navKey.currentContext!);
     try {
       final raw = await FileActions.openDocument();
       if (raw == null) return;
@@ -459,8 +459,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   Future<void> _saveCopy() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final l = LocaleScope.of(context);
+    final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
+    final l = LocaleScope.of(_navKey.currentContext!);
     final now = DateTime.now();
     final name = DocumentIo.fileName(
       _store.active?.title ?? 'tallynote',
@@ -480,8 +480,8 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   Future<void> _exportAs(String kind) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final l = LocaleScope.of(context);
+    final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
+    final l = LocaleScope.of(_navKey.currentContext!);
     final now = DateTime.now();
     final base = _store.active?.title ?? 'tallynote';
     final engine = _makeEngine();
@@ -505,7 +505,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   Future<void> _print() async {
-    final messenger = ScaffoldMessenger.of(context);
+    final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
     try {
       await FileActions.printSheets(_store.sheets, _makeEngine());
     } catch (e) {
@@ -1053,8 +1053,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 final s = _store.sheets
                                     .where((x) => x.id == id)
                                     .firstOrNull;
+                                final navCtx = _navKey.currentContext;
+                                final locale = navCtx == null
+                                    ? LocaleScope.of(context)
+                                    : LocaleScope.of(navCtx);
                                 return s == null || s.title.isEmpty
-                                    ? T.of(LocaleScope.of(context), 'untitled')
+                                    ? T.of(locale, 'untitled')
                                     : s.title;
                               },
                               onSelect: _store.select,
