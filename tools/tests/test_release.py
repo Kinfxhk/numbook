@@ -102,5 +102,12 @@ class LatestValidTest(unittest.TestCase):
             release.builds = orig
 
 
+class PubspecBuildTest(unittest.TestCase):
+    def test_build_number_parsed(self):
+        v = release.pubspec_build()
+        self.assertIsNotNone(v)
+        self.assertTrue(v.isdigit(), v)
+
+
 if __name__ == "__main__":
     unittest.main()
