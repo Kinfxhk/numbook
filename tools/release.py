@@ -218,10 +218,50 @@ def cmd_full(c, skip_checks=False):
     cmd_status(c)
 
 
+def cmd_watch(c):
+    """Quiet daily check: only speaks when a fresh build needed action."""
+    import datetime
+    rows = builds(c, 5)
+    if not rows:
+        return
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=26)
+    fresh = []
+    for b in rows:
+        ts = b["attributes"].get("uploadedDate", "")
+        try:
+            when = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when >= cutoff:
+            fresh.append(b)
+    if not fresh:
+        return
+    acted = []
+    for b in fresh:
+        a = b["attributes"]
+        if a.get("usesNonExemptEncryption") is None:
+            st, _ = call(c, "PATCH", f"/builds/{b['id']}", {
+                "data": {"type": "builds", "id": b["id"],
+                         "attributes": {"usesNonExemptEncryption": False}}})
+            acted.append(f"build {a.get('version')}: compliance {st}")
+    b = latest_valid(c)
+    if b:
+        gid = group_id(c)
+        if gid:
+            st, _ = call(c, "POST", f"/betaGroups/{gid}/relationships/builds", {
+                "data": [{"type": "builds", "id": b["id"]}]})
+            if st == 201:
+                acted.append(f"build {b['attributes'].get('version')} added to {c['internal_group']}")
+    if acted:
+        print("Numbook release watch")
+        for line in acted:
+            print(" •", line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["status", "compliance", "add-to-group",
-                                        "wait", "build", "upload", "full"])
+                                        "wait", "build", "upload", "full", "watch"])
     ap.add_argument("--skip-checks", action="store_true")
     ap.add_argument("--minutes", type=int, default=30)
     a = ap.parse_args()
@@ -234,6 +274,7 @@ def main():
         "build": lambda: cmd_build(c, a.skip_checks),
         "upload": lambda: cmd_upload(c),
         "full": lambda: cmd_full(c, a.skip_checks),
+        "watch": lambda: cmd_watch(c),
     }[a.command]()
 
 
