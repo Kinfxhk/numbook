@@ -166,6 +166,8 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: flutter build web --release --base-href /numbook/ --no-web-resources-cdn
+      - name: Include privacy and support pages in every deployment
+        run: python3 tools/stage_legal_pages.py build/web
       - uses: peaceiris/actions-gh-pages@v4
         if: github.ref == 'refs/heads/main'
         with:
