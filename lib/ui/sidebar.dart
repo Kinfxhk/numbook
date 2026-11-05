@@ -18,6 +18,9 @@ class Sidebar extends StatefulWidget {
   final VoidCallback? onSplit;
   final VoidCallback? onSettings;
   final bool splitActive;
+  /// Tapping a note in the rail. The app uses this to give the note a tab,
+  /// the way a browser keeps a tab per page.
+  final void Function(String id)? onOpen;
 
   const Sidebar({
     super.key,
@@ -30,6 +33,7 @@ class Sidebar extends StatefulWidget {
     this.onSplit,
     this.onSettings,
     this.splitActive = false,
+    this.onOpen,
   });
 
   @override
@@ -65,7 +69,7 @@ class _SidebarState extends State<Sidebar> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(6, 8, 6, 4),
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
             child: Row(
               children: [
                 if (widget.onFile != null)
@@ -90,8 +94,34 @@ class _SidebarState extends State<Sidebar> {
                     dark: _dark,
                     onTap: widget.onSettings!,
                   ),
-                const SizedBox(width: 4),
-                const Spacer(),
+                const SizedBox(width: 6),
+                Expanded(
+                  child:     TextField(
+                    controller: _search,
+                    focusNode: widget.searchFocus,
+                    onChanged: (v) => setState(() => _query = v),
+                    style: TextStyle(fontSize: 12.5, color: Palette.fg(_dark)),
+                    cursorColor: Palette.answer(_dark),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: LocaleScope.t(context, 'search'),
+                      hintStyle: TextStyle(
+                        fontSize: 12.5,
+                        color: Palette.faint(_dark),
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        size: 15,
+                        color: Palette.faint(_dark),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 26,
+                        minHeight: 20,
+                      ),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
                 IconButton(
                   tooltip: LocaleScope.t(context, 'sidebar'),
                   iconSize: 18,
@@ -105,34 +135,6 @@ class _SidebarState extends State<Sidebar> {
                   ),
                 ),
               ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-            child: TextField(
-              controller: _search,
-              focusNode: widget.searchFocus,
-              onChanged: (v) => setState(() => _query = v),
-              style: TextStyle(fontSize: 12.5, color: Palette.fg(_dark)),
-              cursorColor: Palette.answer(_dark),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: LocaleScope.t(context, 'search'),
-                hintStyle: TextStyle(
-                  fontSize: 12.5,
-                  color: Palette.faint(_dark),
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  size: 15,
-                  color: Palette.faint(_dark),
-                ),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 26,
-                  minHeight: 20,
-                ),
-                border: InputBorder.none,
-              ),
             ),
           ),
           Divider(height: 1, color: Palette.hairline(_dark)),
@@ -377,7 +379,12 @@ class _SidebarState extends State<Sidebar> {
           Expanded(
             child: Pressable(
               onTap: () {
-                _store.select(s.id);
+                final open = widget.onOpen;
+                if (open != null) {
+                  open(s.id);
+                } else {
+                  _store.select(s.id);
+                }
                 if (MediaQuery.sizeOf(context).width < 720) {
                   Navigator.of(context).maybePop();
                 }

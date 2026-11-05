@@ -217,6 +217,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _paneB = _newPane(second);
   }
 
+  /// Open a note and give it a tab (the rail's normal tap).
+  void _openSheet(String id) {
+    if (!_tabs.contains(id)) {
+      setState(() => _tabs.add(id));
+    }
+    _store.select(id);
+  }
+
   void _onStore() {
     if (!mounted) return;
     final id = _store.activeId;
@@ -947,6 +955,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       onSplit: _toggleSplit,
       onSettings: _openSettings,
       splitActive: _split,
+      onOpen: _openSheet,
     );
 
     return PlatformMenuBar(
@@ -1146,19 +1155,25 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                     Expanded(
                       child: Column(
                         children: [
-                          _Header(
-                            dark: _dark,
-                            sidebarOpen: _sidebarOpen && wide,
-                            showMenu: !(wide && _sidebarOpen),
-                            split: _split,
-                            onSplit: _toggleSplit,
-                            onFile: _fileMenu,
-                            onSettings: _openSettings,
-                            onMenu: wide
-                                ? _toggleSidebar
-                                : () => _scaffoldKey.currentState?.openDrawer(),
-                          ),
-                          Divider(height: 1, color: Palette.hairline(_dark)),
+                          // No rail means no in-window actions: the rail owns
+                          // them. Only a closed rail (or a phone) still needs
+                          // this strip for its menu button, so collapse it
+                          // entirely otherwise and let the tabs sit at the top.
+                          if (!(wide && _sidebarOpen)) ...[
+                            _Header(
+                              dark: _dark,
+                              sidebarOpen: false,
+                              showMenu: true,
+                              split: _split,
+                              onSplit: _toggleSplit,
+                              onFile: _fileMenu,
+                              onSettings: _openSettings,
+                              onMenu: wide
+                                  ? _toggleSidebar
+                                  : () => _scaffoldKey.currentState?.openDrawer(),
+                            ),
+                            Divider(height: 1, color: Palette.hairline(_dark)),
+                          ],
                           if (tabsRow)
                             _TabBar(
                               dark: _dark,
