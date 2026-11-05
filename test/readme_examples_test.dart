@@ -11,9 +11,12 @@ import 'package:tallynote/engine/engine.dart';
 void main() {
   test('README example blocks match the engine', () {
     final readme = File('README.md').readAsStringSync();
-    final blocks = RegExp(r'```[a-z]*\r?\n([\s\S]*?)```')
+    // Only bare fences are calculator sheets; language-tagged shell blocks
+    // can contain arrows documenting a pipeline, not expected answers.
+    final blocks = RegExp(r'```([a-z]*)\r?\n([\s\S]*?)```')
         .allMatches(readme)
-        .map((m) => m.group(1)!.split(RegExp(r'\r?\n')))
+        .where((m) => m.group(1)!.isEmpty)
+        .map((m) => m.group(2)!.split(RegExp(r'\r?\n')))
         .where((lines) => lines.any((l) => l.contains('→')))
         .toList();
     expect(blocks, isNotEmpty, reason: 'no example block found in README.md');

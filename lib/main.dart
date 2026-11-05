@@ -16,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'data/document.dart';
 import 'data/rates.dart';
 import 'engine/engine.dart';
+import 'engine/presentation.dart';
+import 'ui/editor_paper.dart';
 import 'engine/values.dart';
 import 'ui/editor_pane.dart';
 import 'ui/feedback.dart';
@@ -24,6 +26,8 @@ import 'ui/key_bar.dart';
 import 'ui/settings_sheet.dart';
 import 'ui/sidebar.dart';
 import 'ui/theme.dart';
+
+part 'main_sidebar_divider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -81,6 +85,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   double _uiScale = 1.0;
   String? _locale; // null = follow the system
   String _numberPreset = 'us';
+  DisplayPrecision _displayPrecision = DisplayPrecision.auto;
+  PaperStyle _paperStyle = PaperStyle.plain;
+  bool _highlightCurrentLine = false;
+  double _sidebarW = 250;
+  bool _sidebarDragging = false;
+  double? _sidebarCancelRestore;
   bool _lineNumbers = true;
   bool _showTabs = true;
   final List<String> _tabs = [];
@@ -126,6 +136,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onKey);
     _paneA = _newPane('');
+    const MethodChannel('app.numbook/lifecycle').setMethodCallHandler((call) async {
+      if (call.method != 'prepareQuit') throw MissingPluginException();
+      _flush();
+      await _store.flush();
+      return true;
+    });
     unawaited(_boot());
   }
 
@@ -138,6 +154,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       explicitW: _answerWSet,
     )..addListener(_onPane);
     // an empty id means "not bound yet": _boot loads the active sheet into it
+    pane.setDisplayPrecision(_displayPrecision);
+    pane.setPaperAppearance(
+      style: _paperStyle,
+      highlightLine: _highlightCurrentLine,
+    );
     pane.load(sheetId);
     return pane;
   }
@@ -174,6 +195,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
     _numberPreset = prefs.getString('tallynote.numberFormat') ?? 'us';
+    _displayPrecision =
+        displayPrecisionFrom(prefs.getString('tallynote.displayPrecision'));
+    _paperStyle = paperStyleFrom(prefs.getString('tallynote.paperStyle'));
+    _highlightCurrentLine =
+        prefs.getBool('tallynote.highlightCurrentLine') ?? false;
+    _sidebarW = prefs.getDouble('tallynote.sidebarWidth') ?? 250;
     _lineNumbers = prefs.getBool('tallynote.lineNumbers') ?? true;
     _showTabs = prefs.getBool('tallynote.showTabs') ?? true;
     _signColours = prefs.getBool('tallynote.signColours') ?? true;
@@ -202,6 +229,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await Rates.load(allowNetwork: _autoRates);
     for (final p in _livePanes) {
       p.rebuildEngine();
+      p.setDisplayPrecision(_displayPrecision);
+      p.setPaperAppearance(
+        style: _paperStyle,
+        highlightLine: _highlightCurrentLine,
+      );
     }
     if (!mounted) return;
     setState(() {});
@@ -510,6 +542,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           setState(() => _answersVisible = !_answersVisible);
           _saveSettings();
         }),
+        item(t('resetAnswerWidth'), onSelected: () {
+          setState(() {
+            _focused.resetAnswerWidth();
+            _answerW = _focused.answerW;
+            _answerWSet = false;
+          });
+          _saveSettings();
+        }),
         item('${t('lineNumbers')}${on(_lineNumbers)}', onSelected: () {
           setState(() => _lineNumbers = !_lineNumbers);
           _saveSettings();
@@ -568,6 +608,26 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                               uiScale: _uiScale,
                               locale: _locale ?? _effectiveLocale,
                               numberPreset: _numberPreset,
+                              displayPrecision:
+                                  displayPrecisionKey(_displayPrecision),
+                              paperStyle: paperStyleKey(_paperStyle),
+                              highlightCurrentLine: _highlightCurrentLine,
+                              onPaperStyle: (v) {
+                                setState(
+                                  () => _paperStyle = paperStyleFrom(v),
+                                );
+                                for (final p in _livePanes) {
+                                  p.setPaperAppearance(style: _paperStyle);
+                                }
+                                _saveSettings();
+                              },
+                              onHighlightCurrentLine: (v) {
+                                setState(() => _highlightCurrentLine = v);
+                                for (final p in _livePanes) {
+                                  p.setPaperAppearance(highlightLine: v);
+                                }
+                                _saveSettings();
+                              },
                               onLocale: (v) {
                                 setState(() => _locale = v);
                                 _saveSettings();
@@ -576,6 +636,16 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 setState(() => _numberPreset = v);
                                 for (final p in _livePanes) {
                                   p.rebuildEngine();
+                                }
+                                _saveSettings();
+                              },
+                              onDisplayPrecision: (v) {
+                                setState(
+                                  () => _displayPrecision =
+                                      displayPrecisionFrom(v),
+                                );
+                                for (final p in _livePanes) {
+                                  p.setDisplayPrecision(_displayPrecision);
                                 }
                                 _saveSettings();
                               },
@@ -724,10 +794,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     final base = _store.active?.title ?? 'tallynote';
     final engine = _makeEngine();
     final sheets = _store.sheets;
+    final precision = _displayPrecision;
     final (content, ext) = switch (kind) {
-      'md' => (DocumentIo.markdown(sheets, engine), 'md'),
-      'csv' => (DocumentIo.csv(sheets, engine), 'csv'),
-      _ => (DocumentIo.plainText(sheets, engine), 'txt'),
+      'md' => (DocumentIo.markdown(sheets, engine, precision: precision), 'md'),
+      'csv' => (DocumentIo.csv(sheets, engine, precision: precision), 'csv'),
+      _ => (DocumentIo.plainText(sheets, engine, precision: precision), 'txt'),
     };
     final name = DocumentIo.fileName(base, now, ext);
     final ok = await FileActions.saveAs(
@@ -745,7 +816,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   Future<void> _print() async {
     final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
     try {
-      await FileActions.printSheets(_store.sheets, _makeEngine());
+      await FileActions.printSheets(_store.sheets, _makeEngine(), precision: _displayPrecision);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not print: $e')));
     }
@@ -800,6 +871,16 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
     await prefs.setString('tallynote.numberFormat', _numberPreset);
+    await prefs.setString(
+      'tallynote.displayPrecision',
+      displayPrecisionKey(_displayPrecision),
+    );
+    await prefs.setString('tallynote.paperStyle', paperStyleKey(_paperStyle));
+    await prefs.setBool(
+      'tallynote.highlightCurrentLine',
+      _highlightCurrentLine,
+    );
+    await prefs.setDouble('tallynote.sidebarWidth', _sidebarW);
     await prefs.setBool('tallynote.lineNumbers', _lineNumbers);
     await prefs.setBool('tallynote.showTabs', _showTabs);
     await prefs.setBool('tallynote.signColours', _signColours);
@@ -847,7 +928,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   /// when each one still gets the 340px a pane needs, stacked when it does not
   /// (a phone, or a tablet with the sidebar open).
   ///
-  /// [width] is the editor area, not the window: the sidebar takes 250px of it.
+  /// [width] is the editor area, not the window: the sidebar takes [_sidebarW] of it.
   Widget _panesView(double width) {
     final b = _paneB;
     if (b == null) {
@@ -940,10 +1021,13 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     onFocus: () => _focusPane(p),
     onPickSheet: _activate,
     onAnswerWidth: (w) {
-      _answerW = w;
-      _answerWSet = true;
+      setState(() {
+        _answerW = p.answerW;
+        _answerWSet = p.explicitW;
+      });
       _saveSettings();
     },
+    numberFormat: NumberFormat.ofPreset(_numberPreset),
   );
 
   @override
@@ -984,6 +1068,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     final sidebar = Sidebar(
       store: _store,
       dark: _dark,
+      width: wide ? _sidebarW.clamp(180.0, media.size.width * 0.45) : 250,
       wheelBlocked: _zoomModifier,
       searchFocus: _searchFocus,
       onClose: wide ? _toggleSidebar : () => Navigator.of(context).maybePop(),
@@ -1186,6 +1271,50 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                   children: [
                     if (wide && _sidebarOpen) ...[
                       sidebar,
+                      _SidebarResizeDivider(
+                        dark: _dark,
+                        dragging: _sidebarDragging,
+                        width: _sidebarW,
+                        onDragStart: () => setState(() {
+                          _sidebarCancelRestore = _sidebarW;
+                          _sidebarDragging = true;
+                        }),
+                        onDrag: (dx) => setState(() {
+                          _sidebarW = (_sidebarW + dx).clamp(
+                            180.0,
+                            media.size.width * 0.45,
+                          );
+                        }),
+                        onDragEnd: () {
+                          setState(() {
+                            _sidebarDragging = false;
+                            _sidebarCancelRestore = null;
+                          });
+                          _saveSettings();
+                        },
+                        onDragCancel: () {
+                          setState(() {
+                            if (_sidebarCancelRestore != null) {
+                              _sidebarW = _sidebarCancelRestore!;
+                            }
+                            _sidebarDragging = false;
+                            _sidebarCancelRestore = null;
+                          });
+                        },
+                        onReset: () {
+                          setState(() => _sidebarW = 250);
+                          _saveSettings();
+                        },
+                        onNudge: (dx) {
+                          setState(() {
+                            _sidebarW = (_sidebarW + dx).clamp(
+                              180.0,
+                              media.size.width * 0.45,
+                            );
+                          });
+                          _saveSettings();
+                        },
+                      ),
                       VerticalDivider(width: 1, color: Palette.hairline(_dark)),
                     ],
                     Expanded(
@@ -1236,7 +1365,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 Positioned.fill(
                                   // the split's breakpoint is about the room
                                   // the editor has, so measure that, not the
-                                  // window: the sidebar eats 250px of it
+                                  // window: the sidebar eats [_sidebarW]px of it
                                   child: LayoutBuilder(
                                     builder: (context, box) =>
                                         _panesView(box.maxWidth),

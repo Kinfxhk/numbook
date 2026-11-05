@@ -21,6 +21,7 @@ class Sidebar extends StatefulWidget {
   /// Tapping a note in the rail. The app uses this to give the note a tab,
   /// the way a browser keeps a tab per page.
   final void Function(String id)? onOpen;
+  final double width;
 
   const Sidebar({
     super.key,
@@ -34,6 +35,7 @@ class Sidebar extends StatefulWidget {
     this.onSettings,
     this.splitActive = false,
     this.onOpen,
+    this.width = 250,
   });
 
   @override
@@ -63,7 +65,7 @@ class _SidebarState extends State<Sidebar> {
     final phone = MediaQuery.sizeOf(context).width < 720;
 
     return Container(
-      width: 250,
+      width: widget.width,
       color: _dark ? const Color(0xFF141517) : const Color(0xFFF3F1EC),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

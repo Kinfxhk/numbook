@@ -170,7 +170,23 @@ class DocumentStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
+  Future<void> _writeChain = Future<void>.value();
+
+  /// Drain every earlier write, then persist the latest live pane contents.
+  /// Call after flushing editor debounces and before acknowledging app exit.
+  Future<void> flush() async {
+    await _persist();
+    if (_keepBackup || saveFailed) {
+      throw StateError('Document could not be saved; quit was cancelled.');
+    }
+  }
+
+  Future<void> _persist() {
+    _writeChain = _writeChain.then((_) => _writeCurrentState());
+    return _writeChain;
+  }
+
+  Future<void> _writeCurrentState() async {
     // the backup is all that is left of the damaged store: do not bury it
     if (_keepBackup) return;
     final prefs = await SharedPreferences.getInstance();

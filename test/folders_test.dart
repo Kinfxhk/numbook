@@ -23,6 +23,7 @@ void main() {
     expect(store.inFolder(work.id).single.id, sheet.id);
     expect(store.inFolder(null).every((s) => s.folderId == null), isTrue);
 
+    await store.flush();
     final again = DocumentStore();
     await again.load();
     expect(again.folders.single.name, 'Work');
@@ -70,6 +71,7 @@ void main() {
     expect(store.inFolder(null).first.id, a.id);
 
     store.rename(a.id, 'Budget 2027');
+    await store.flush();
     final again = DocumentStore();
     await again.load();
     final reloaded = again.sheets.firstWhere((x) => x.id == a.id);

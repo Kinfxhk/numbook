@@ -2,12 +2,24 @@ import 'dart:convert';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/presentation.dart';
 
 /// Everything that turns the in-app library into a portable artefact, and back.
 /// Pure functions only: no plugins, no dialogs, so it is all testable.
 class DocumentIo {
   static const fileExtension = 'tallynote';
   static const appTag = 'tallynote';
+
+  /// Shared rows for text, CSV and PDF exports from the app.
+  static List<LineResult> exportResults(
+    Sheet sheet,
+    SheetEngine engine, {
+    DisplayPrecision precision = DisplayPrecision.auto,
+  }) => presentResults(
+    engine.evaluate(sheet.content.split('\n')),
+    precision,
+    engine.format,
+  );
 
   /// Whole library as a `.tallynote` document.
   static String libraryJson(
@@ -57,13 +69,17 @@ class DocumentIo {
 
   /// Markdown: one section per sheet. Lines that produced an answer become a
   /// two-column line so the result survives outside the app.
-  static String markdown(List<Sheet> sheets, SheetEngine engine) {
+  static String markdown(
+    List<Sheet> sheets,
+    SheetEngine engine, {
+    DisplayPrecision precision = DisplayPrecision.auto,
+  }) {
     final out = StringBuffer();
     for (final sheet in sheets) {
       out.writeln('# ${sheet.title.isEmpty ? 'Untitled' : sheet.title}');
       out.writeln();
       final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
+      final results = exportResults(sheet, engine, precision: precision);
       for (var i = 0; i < lines.length; i++) {
         final answer = results[i].display;
         if (answer == null) {
@@ -78,13 +94,17 @@ class DocumentIo {
   }
 
   /// CSV with one row per line that has an answer; quoting is RFC 4180.
-  static String csv(List<Sheet> sheets, SheetEngine engine) {
+  static String csv(
+    List<Sheet> sheets,
+    SheetEngine engine, {
+    DisplayPrecision precision = DisplayPrecision.auto,
+  }) {
     final rows = <List<String>>[
       ['sheet', 'line', 'input', 'answer', 'error'],
     ];
     for (final sheet in sheets) {
       final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
+      final results = exportResults(sheet, engine, precision: precision);
       for (var i = 0; i < lines.length; i++) {
         final r = results[i];
         if (r.display == null && r.error == null) continue;
@@ -102,13 +122,17 @@ class DocumentIo {
   }
 
   /// Plain text, for printing and for "just give me the note".
-  static String plainText(List<Sheet> sheets, SheetEngine engine) {
+  static String plainText(
+    List<Sheet> sheets,
+    SheetEngine engine, {
+    DisplayPrecision precision = DisplayPrecision.auto,
+  }) {
     final out = StringBuffer();
     for (final sheet in sheets) {
       out.writeln(sheet.title.isEmpty ? 'Untitled' : sheet.title);
       out.writeln('-' * 40);
       final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
+      final results = exportResults(sheet, engine, precision: precision);
       for (var i = 0; i < lines.length; i++) {
         final a = results[i].display;
         out.writeln(a == null ? lines[i] : '${lines[i]}    $a');

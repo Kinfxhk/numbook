@@ -26,8 +26,14 @@ Future<void> showSettingsSheet({
   required double uiScale,
   required String locale,
   required String numberPreset,
+  required String displayPrecision,
+  required String paperStyle,
+  required bool highlightCurrentLine,
   required ValueChanged<String> onLocale,
   required ValueChanged<String> onNumberPreset,
+  required ValueChanged<String> onDisplayPrecision,
+  required ValueChanged<String> onPaperStyle,
+  required ValueChanged<bool> onHighlightCurrentLine,
   required ValueChanged<bool> onAnswers,
   required ValueChanged<String> onThemeMode,
   required ValueChanged<bool> onHaptics,
@@ -60,7 +66,13 @@ Future<void> showSettingsSheet({
       uiScale: uiScale,
       locale: locale,
       numberPreset: numberPreset,
+      displayPrecision: displayPrecision,
+      paperStyle: paperStyle,
+      highlightCurrentLine: highlightCurrentLine,
       onNumberPreset: onNumberPreset,
+      onDisplayPrecision: onDisplayPrecision,
+      onPaperStyle: onPaperStyle,
+      onHighlightCurrentLine: onHighlightCurrentLine,
       onLocale: onLocale,
       onAnswers: onAnswers,
       onThemeMode: onThemeMode,
@@ -95,8 +107,14 @@ class _SettingsDialog extends StatefulWidget {
   final double uiScale;
   final String locale;
   final String numberPreset;
+  final String displayPrecision;
+  final String paperStyle;
+  final bool highlightCurrentLine;
   final ValueChanged<String> onLocale;
   final ValueChanged<String> onNumberPreset;
+  final ValueChanged<String> onDisplayPrecision;
+  final ValueChanged<String> onPaperStyle;
+  final ValueChanged<bool> onHighlightCurrentLine;
   final ValueChanged<bool> onAnswers;
   final ValueChanged<String> onThemeMode;
   final ValueChanged<bool> onHaptics;
@@ -127,8 +145,14 @@ class _SettingsDialog extends StatefulWidget {
     required this.uiScale,
     required this.locale,
     required this.numberPreset,
+    required this.displayPrecision,
+    required this.paperStyle,
+    required this.highlightCurrentLine,
     required this.onLocale,
     required this.onNumberPreset,
+    required this.onDisplayPrecision,
+    required this.onPaperStyle,
+    required this.onHighlightCurrentLine,
     required this.onAnswers,
     required this.onThemeMode,
     required this.onHaptics,
@@ -164,6 +188,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late double scale = widget.uiScale;
   late String locale = widget.locale;
   late String preset = widget.numberPreset;
+  late String precision = widget.displayPrecision;
+  late String paper = widget.paperStyle;
+  late bool highlightLine = widget.highlightCurrentLine;
   String? rateError;
 
   @override
@@ -272,6 +299,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           widget.onNegColour(name);
         }),
       ],
+      _row(
+        T.of(locale, 'paperStyle'),
+        T.of(locale, 'paperStyleHint'),
+        _paperStylePicker(),
+      ),
+      _row(
+        T.of(locale, 'highlightCurrentLine'),
+        T.of(locale, 'highlightCurrentLineHint'),
+        _switch(highlightLine, (v) {
+          setState(() => highlightLine = v);
+          widget.onHighlightCurrentLine(v);
+        }, 'switch-current-line'),
+      ),
     ],
   );
 
@@ -282,6 +322,44 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         T.of(locale, 'textSize'),
         T.of(locale, 'textSizeHint'),
         _scaleButtons(),
+      ),
+      _row(
+        T.of(locale, 'displayPrecision'),
+        T.of(locale, 'displayPrecisionHint'),
+        Wrap(
+          spacing: 2,
+          children: [
+            for (final entry in const [
+              ('auto', 'Auto'),
+              ('2', '2'),
+              ('4', '4'),
+              ('8', '8'),
+              ('full', 'Full'),
+            ])
+              TextButton(
+                onPressed: () {
+                  setState(() => precision = entry.$1);
+                  widget.onDisplayPrecision(entry.$1);
+                },
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(36, 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  foregroundColor: precision == entry.$1
+                      ? Palette.answer(dark)
+                      : Palette.faint(dark),
+                ),
+                child: Text(
+                  entry.$2,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: precision == entry.$1
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
       _row(
         'Number format',
@@ -401,6 +479,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
         child: Text(
+          T.of(locale, 'displayPrecisionHint'),
+          style: TextStyle(
+            fontSize: 11,
+            height: 1.5,
+            color: Palette.faint(dark),
+          ),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+        child: Text(
           T.of(locale, 'privacy'),
           style: TextStyle(
             fontSize: 11,
@@ -446,6 +535,70 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       ],
     ),
   );
+
+  Widget _paperStylePicker() {
+    Widget preview(String key, String label) {
+      final selected = paper == key;
+      return Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: InkWell(
+          key: ValueKey('paper-$key'),
+          onTap: () {
+            setState(() => paper = key);
+            widget.onPaperStyle(key);
+          },
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            width: 52,
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: selected
+                    ? Palette.answer(dark)
+                    : Palette.hairline(dark),
+                width: selected ? 1.5 : 1,
+              ),
+              borderRadius: BorderRadius.circular(6),
+              color: Palette.bg(dark),
+            ),
+            child: CustomPaint(
+              painter: _PaperPreviewPainter(
+                dark: dark,
+                style: key,
+              ),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    color: selected
+                        ? Palette.answer(dark)
+                        : Palette.faint(dark),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        preview('plain', T.of(locale, 'paperPlain')),
+        preview('single', T.of(locale, 'paperSingle')),
+        preview('double', T.of(locale, 'paperDouble')),
+      ],
+    );
+  }
 
   /// A settings row. A phone cannot hold a five-button control beside its
   /// label, so under 380dp the control goes underneath instead of overflowing.
@@ -583,5 +736,34 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           ),
       ],
     );
+  }
+}
+
+class _PaperPreviewPainter extends CustomPainter {
+  const _PaperPreviewPainter({required this.dark, required this.style});
+
+  final bool dark;
+  final String style;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (style == 'plain') return;
+    final paint = Paint()
+      ..color = Palette.hairline(dark)
+      ..strokeWidth = 1;
+    const rows = 3;
+    final step = size.height / (rows + 1);
+    for (var i = 1; i <= rows; i++) {
+      final y = step * i;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+      if (style == 'double') {
+        canvas.drawLine(Offset(0, y - 3), Offset(size.width, y - 3), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PaperPreviewPainter oldDelegate) {
+    return dark != oldDelegate.dark || style != oldDelegate.style;
   }
 }

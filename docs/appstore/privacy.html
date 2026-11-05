@@ -29,7 +29,7 @@
 <main>
   <div class="kicker">Numbook · privacy</div>
   <h1>隱私政策</h1>
-  <p class="meta">最後更新：2026 年 11 月 4 日</p>
+  <p class="meta">最後更新：2026 年 11 月 5 日</p>
 
   <p class="lede">Numbook 沒有帳號、沒有分析工具、沒有廣告。你的記事只留在你的裝置上。</p>
 
@@ -38,17 +38,26 @@
 
   <h2>你的記事存在哪裡</h2>
   <ul>
-    <li>所有記事、分頁與資料夾都存放在裝置本機（Android／桌面版為 app 的 SharedPreferences，
-        macOS／iOS 版為 app 沙盒內的同等儲存）。</li>
+    <li>記事、資料夾、設定與匯率快取存放於裝置本機；macOS 版使用 app 沙盒內的偏好儲存。
+        App Store 版快速計算草稿也只保存在本機。</li>
     <li>這些資料不會上傳到任何伺服器，亦不會與其他 app 分享。</li>
-    <li>移除 app 或清除 app 資料即會刪除全部記事；匯出功能由你自己選擇要匯出哪一份。</li>
+    <li>資料會保留至你刪除記事或清除 app 資料。macOS 移除 app 後可能保留偏好與容器；
+        完整移除本機資料前請先匯出備份，並可電郵聯絡我們取得清除指引。匯出檔案與系統備份由你管理。</li>
   </ul>
 
   <h2>唯一的網絡連線</h2>
   <p>貨幣換算需要匯率。當你開啟「自動更新匯率」時，app 會向
      <code>api.frankfurter.app</code> 要求最新匯率（歐洲央行參考匯率）。
-     這個請求只帶日期與貨幣代碼，<strong>不包含</strong>你的記事、帳號或裝置識別碼。
-     關閉該選項後，app 完全不發出任何網絡請求，離線亦可正常計算。</p>
+     app 的匯率請求<strong>不包含</strong>你的記事、帳號或裝置識別碼；網絡服務仍會接收一般連線資料（例如 IP 位址）。
+     我們不接收匯率服務的連線紀錄；服務供應者依其政策處理連線。
+     關閉自動更新後，app 不會自動請求匯率；你仍可主動按「更新匯率」。離線時使用本機快取或內建匯率。
+     開啟支援網站或寄信會交由你選擇的瀏覽器／郵件 app 處理。</p>
+
+  <h2>分享、保留與刪除請求</h2>
+  <p>我們沒有記事伺服器，不會向廣告商或分析服務分享記事。若你主動寄送錯誤回報，
+     電郵地址、描述及你自行附上的檔案會用於回覆與排錯；請勿附上密碼或不必要的個人資料。
+     相關通訊只保留於支援所需期間；可寄信要求刪除我們持有的支援通訊。
+     本機記事請在 app 刪除；因我們沒有其副本，無法遠端查看、還原或刪除。</p>
 
   <h2>權限</h2>
   <ul>
@@ -71,9 +80,12 @@
   <h2 class="en">English summary</h2>
   <p class="en">Numbook has no account, no analytics, no ads and no user identifier. Every note lives on
   your device and is never uploaded. The only network request is the optional exchange-rate fetch to
-  <code>api.frankfurter.app</code>, which sends a date and currency codes only — never your notes or a
-  device id. Turn that option off and the app makes no network calls at all. File import/export and
-  printing go through the system file picker, so the app only sees the file you pick.
+  <code>api.frankfurter.app</code> — never your notes or an app-generated device id. The service still
+  receives ordinary connection metadata such as your IP address. Turning automatic updates off prevents
+  automatic rate requests; an explicit refresh still connects. Notes, quick drafts and preferences stay
+  local until deleted. Uninstalling on macOS may retain local preferences; exported files and OS backups
+  are managed separately. Email you voluntarily send is used only for support; contact us to request its deletion.
+  File access is user-selected; opening support links uses your browser.
   Questions: <a href="https://github.com/Kinfxhk/numbook/issues">GitHub issues</a> or
   <a href="mailto:178037814+Kinfxhk@users.noreply.github.com">178037814+Kinfxhk@users.noreply.github.com</a>.</p>
 
