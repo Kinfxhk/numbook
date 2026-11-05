@@ -185,6 +185,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
     await _store.load();
     _store.addListener(_onStore);
+    // Seed the tab list: the tab is the document title, so even a single note
+    // must have one from the first frame.
+    final bootId = _store.activeId;
+    if (bootId != null && !_tabs.contains(bootId)) _tabs.add(bootId);
     // the left pane keeps its own sheet, so a restart does not swap the sides
     final first =
         splitOn &&
@@ -374,6 +378,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   void _closeTab(String id) {
+    // One tab is the document title: closing the last one would leave the
+    // window without a title or a way back.
+    if (_tabs.length <= 1) return;
     _tabs.remove(id);
     if (_store.activeId == id && _tabs.isNotEmpty) _store.select(_tabs.last);
     setState(() {});
@@ -418,13 +425,30 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   /// convenience, but File/View/Window must exist in the system menu bar.
   List<PlatformMenu> get _platformMenus {
     final l = _locale ?? _effectiveLocale;
+    // PlatformProvidedMenuItem asserts when the running platform has no menu
+    // for it (widget tests build as android), so only emit them on macOS.
+    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
     String t(String key) => T.of(l, key);
     String on(bool v) => v ? '  ✓' : '';
     PlatformMenuItem item(String label, {VoidCallback? onSelected, SingleActivator? shortcut}) {
       return PlatformMenuItem(label: label, onSelected: onSelected, shortcut: shortcut);
     }
 
+    // The first menu becomes the app menu, so it must hold the app-level
+    // commands a Mac user looks for there: About, Settings ⌘,, Services,
+    // Hide/Quit. Everything else follows as real top-level menus.
     return [
+      PlatformMenu(label: 'Numbook', menus: [
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
+        item(t('settings'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.comma, meta: true),
+            onSelected: _openSettings),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.servicesSubmenu),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hideOtherApplications),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.showAllApplications),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+      ]),
       PlatformMenu(label: 'Edit', menus: [
         item('Undo',
             shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
@@ -473,6 +497,15 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
         item(t('split'),
             shortcut: const SingleActivator(LogicalKeyboardKey.backslash, meta: true, shift: true),
             onSelected: _toggleSplit),
+        item('Zoom In',
+            shortcut: const SingleActivator(LogicalKeyboardKey.equal, meta: true),
+            onSelected: () => _zoom(1.1)),
+        item('Zoom Out',
+            shortcut: const SingleActivator(LogicalKeyboardKey.minus, meta: true),
+            onSelected: () => _zoom(1 / 1.1)),
+        item('Actual Size',
+            shortcut: const SingleActivator(LogicalKeyboardKey.digit0, meta: true),
+            onSelected: () => _setScale(1.0)),
         item('${t('answers')}${on(_answersVisible)}', onSelected: () {
           setState(() => _answersVisible = !_answersVisible);
           _saveSettings();
@@ -493,7 +526,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
             onSelected: () => _setTheme('dark')),
       ]),
       PlatformMenu(label: 'Window', menus: [
-        item(t('settings'), onSelected: _openSettings),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.minimizeWindow),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.zoomWindow),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.arrangeWindowsInFront),
       ]),
       PlatformMenu(label: 'Help', menus: [
         item(t('supportPage'), onSelected: () => _openURL('https://kinfxhk.github.io/numbook/support.html')),
@@ -501,6 +536,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       ]),
     ];
   }
+
 
   void _openURL(String url) {
     launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -930,7 +966,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     }
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final media = MediaQuery.of(context);
-    final tabsRow = _showTabs && _tabs.length > 1;
+    final tabsRow = _showTabs;
     // the key row plus a soft keyboard must never squeeze the editor under
     // 120dp: in landscape they would, so the row is the one that gives way
     final editorRoom =
@@ -1081,13 +1117,13 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           const SingleActivator(
             LogicalKeyboardKey.keyS,
             meta: true,
-            shift: true,
+            alt: true,
           ): () =>
               _format('~~', '~~'),
           const SingleActivator(
             LogicalKeyboardKey.keyS,
             control: true,
-            shift: true,
+            alt: true,
           ): () =>
               _format('~~', '~~'),
           const SingleActivator(LogicalKeyboardKey.keyF, meta: true):

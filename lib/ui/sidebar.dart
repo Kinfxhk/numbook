@@ -72,31 +72,8 @@ class _SidebarState extends State<Sidebar> {
             padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
             child: Row(
               children: [
-                if (widget.onFile != null)
-                  _HeaderAction(
-                    icon: Icons.folder_open_outlined,
-                    tooltip: LocaleScope.t(context, 'file'),
-                    dark: _dark,
-                    onTap: widget.onFile!,
-                  ),
-                if (widget.onSplit != null)
-                  _HeaderAction(
-                    icon: Icons.vertical_split,
-                    tooltip: LocaleScope.t(context, 'split'),
-                    dark: _dark,
-                    active: widget.splitActive,
-                    onTap: widget.onSplit!,
-                  ),
-                if (widget.onSettings != null)
-                  _HeaderAction(
-                    icon: Icons.tune,
-                    tooltip: LocaleScope.t(context, 'settings'),
-                    dark: _dark,
-                    onTap: widget.onSettings!,
-                  ),
-                const SizedBox(width: 6),
                 Expanded(
-                  child:     TextField(
+                  child: TextField(
                     controller: _search,
                     focusNode: widget.searchFocus,
                     onChanged: (v) => setState(() => _query = v),
@@ -104,6 +81,12 @@ class _SidebarState extends State<Sidebar> {
                     cursorColor: Palette.answer(_dark),
                     decoration: InputDecoration(
                       isDense: true,
+                      filled: true,
+                      fillColor: _dark
+                          ? const Color(0xFF232426)
+                          : const Color(0xFFE9E5DC),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                       hintText: LocaleScope.t(context, 'search'),
                       hintStyle: TextStyle(
                         fontSize: 12.5,
@@ -122,6 +105,30 @@ class _SidebarState extends State<Sidebar> {
                     ),
                   ),
                 ),
+                if (widget.onSplit != null)
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'split'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onSplit!,
+                    icon: Icon(Icons.vertical_split,
+                        color: widget.splitActive
+                            ? Palette.answer(_dark)
+                            : Palette.faint(_dark)),
+                  ),
+                if (widget.onSettings != null)
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'settings'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onSettings!,
+                    icon: Icon(Icons.settings_outlined,
+                        color: Palette.faint(_dark)),
+                  ),
                 IconButton(
                   tooltip: LocaleScope.t(context, 'sidebar'),
                   iconSize: 18,
@@ -647,40 +654,3 @@ class _SidebarState extends State<Sidebar> {
 
 final ValueNotifier<bool> _neverSide = ValueNotifier<bool>(false);
 
-/// Compact document action for the sidebar's leading edge. Same glyphs as the
-/// editor header used to carry, sized for a 250px rail rather than a title bar.
-class _HeaderAction extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool dark;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _HeaderAction({
-    required this.icon,
-    required this.tooltip,
-    required this.dark,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: SizedBox(
-          width: 28,
-          height: 28,
-          child: Icon(
-            icon,
-            size: 16,
-            color: active ? Palette.answer(dark) : Palette.faint(dark),
-          ),
-        ),
-      ),
-    );
-  }
-}

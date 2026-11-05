@@ -126,12 +126,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Work'), findsOneWidget);
-    expect(find.text('Q4 budget'), findsOneWidget);
+    // the note title appears twice: once in the rail, once in its tab
+    expect(find.text('Q4 budget'), findsAtLeastNWidgets(1));
     expect(find.text('Loose note'), findsOneWidget);
     expect(find.text('Unfiled'), findsOneWidget);
 
     // tapping a sheet through Pressable still selects and loads it
-    await tester.tap(find.text('Q4 budget'));
+    await tester.tap(find.text('Q4 budget').first);
     await tester.pump(const Duration(milliseconds: 60));
     final editor = tester.widget<TextField>(
       find.descendant(
