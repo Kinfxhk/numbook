@@ -11,8 +11,10 @@ import 'package:tallynote/engine/engine.dart';
 void main() {
   test('README example blocks match the engine', () {
     final readme = File('README.md').readAsStringSync();
-    // Only bare fences are calculator sheets; language-tagged shell blocks
-    // can contain arrows documenting a pipeline, not expected answers.
+    // Bare fences are notepad examples: the answer sits after `→`.
+    // ```bash / ```powershell are commands. The release `full` comment
+    // (`build → upload → wait → compliance → add-to-group`) documents
+    // that pipeline; it is not an answer the engine should produce.
     final blocks = RegExp(r'```([a-z]*)\r?\n([\s\S]*?)```')
         .allMatches(readme)
         .where((m) => m.group(1)!.isEmpty)
