@@ -12,6 +12,12 @@ class Sidebar extends StatefulWidget {
   final VoidCallback onClose;
   final ValueListenable<bool>? wheelBlocked;
   final FocusNode? searchFocus;
+  /// Document controls live at the window's leading edge, the way a plain
+  /// notepad puts its toolbar: file, split view, settings.
+  final VoidCallback? onFile;
+  final VoidCallback? onSplit;
+  final VoidCallback? onSettings;
+  final bool splitActive;
 
   const Sidebar({
     super.key,
@@ -20,6 +26,10 @@ class Sidebar extends StatefulWidget {
     required this.onClose,
     this.wheelBlocked,
     this.searchFocus,
+    this.onFile,
+    this.onSplit,
+    this.onSettings,
+    this.splitActive = false,
   });
 
   @override
@@ -55,22 +65,39 @@ class _SidebarState extends State<Sidebar> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 6, 4),
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 4),
             child: Row(
               children: [
-                Text(
-                  'Numbook',
-                  style: TextStyle(
-                    fontSize: 13,
-                    letterSpacing: 0.4,
-                    fontWeight: FontWeight.w600,
-                    color: Palette.faint(_dark),
+                if (widget.onFile != null)
+                  _HeaderAction(
+                    icon: Icons.folder_open_outlined,
+                    tooltip: LocaleScope.t(context, 'file'),
+                    dark: _dark,
+                    onTap: widget.onFile!,
                   ),
-                ),
+                if (widget.onSplit != null)
+                  _HeaderAction(
+                    icon: Icons.vertical_split,
+                    tooltip: LocaleScope.t(context, 'split'),
+                    dark: _dark,
+                    active: widget.splitActive,
+                    onTap: widget.onSplit!,
+                  ),
+                if (widget.onSettings != null)
+                  _HeaderAction(
+                    icon: Icons.tune,
+                    tooltip: LocaleScope.t(context, 'settings'),
+                    dark: _dark,
+                    onTap: widget.onSettings!,
+                  ),
+                const SizedBox(width: 4),
                 const Spacer(),
                 IconButton(
                   tooltip: LocaleScope.t(context, 'sidebar'),
                   iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                   onPressed: widget.onClose,
                   icon: Icon(
                     Icons.keyboard_double_arrow_left,
@@ -612,3 +639,41 @@ class _SidebarState extends State<Sidebar> {
 }
 
 final ValueNotifier<bool> _neverSide = ValueNotifier<bool>(false);
+
+/// Compact document action for the sidebar's leading edge. Same glyphs as the
+/// editor header used to carry, sized for a 250px rail rather than a title bar.
+class _HeaderAction extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool dark;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _HeaderAction({
+    required this.icon,
+    required this.tooltip,
+    required this.dark,
+    required this.onTap,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: Icon(
+            icon,
+            size: 16,
+            color: active ? Palette.answer(dark) : Palette.faint(dark),
+          ),
+        ),
+      ),
+    );
+  }
+}

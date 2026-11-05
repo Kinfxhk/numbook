@@ -404,6 +404,158 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     }
   }
 
+
+  /// The macOS menu bar is the app's real menu: the in-window popup stays as a
+  /// convenience, but File/View/Window must exist in the system menu bar.
+  List<PlatformMenu> get _platformMenus {
+    final l = _locale ?? _effectiveLocale;
+    String t(String key) => T.of(l, key);
+    return [
+      PlatformMenu(label: 'Edit', menus: [
+        PlatformMenuItem(
+          label: 'Undo',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+          onSelected: () => _textAction(UndoTextIntent(SelectionChangedCause.keyboard)),
+        ),
+        PlatformMenuItem(
+          label: 'Redo',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true),
+          onSelected: () => _textAction(RedoTextIntent(SelectionChangedCause.keyboard)),
+        ),
+        PlatformMenuItem(
+          label: 'Cut',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyX, meta: true),
+          onSelected: () => _textAction(CopySelectionTextIntent.cut(SelectionChangedCause.keyboard)),
+        ),
+        PlatformMenuItem(
+          label: 'Copy',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyC, meta: true),
+          onSelected: () => _textAction(CopySelectionTextIntent.copy),
+        ),
+        PlatformMenuItem(
+          label: 'Paste',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyV, meta: true),
+          onSelected: () => _textAction(PasteTextIntent(SelectionChangedCause.keyboard)),
+        ),
+        PlatformMenuItem(
+          label: 'Select All',
+          shortcut: const SingleActivator(LogicalKeyboardKey.keyA, meta: true),
+          onSelected: () => _textAction(SelectAllTextIntent(SelectionChangedCause.keyboard)),
+        ),
+      ]),
+      PlatformMenu(label: t('file'), menus: [
+        PlatformMenuItem(label: t('fileNew'), onSelected: () => _store.create()),
+        PlatformMenuItem(label: t('fileOpen'), onSelected: _openFromFile),
+        PlatformMenuItem(label: t('fileSaveCopy'), onSelected: _saveCopy),
+        PlatformMenuItem(label: t('exportMd'), onSelected: () => _exportAs('md')),
+        PlatformMenuItem(label: t('exportCsv'), onSelected: () => _exportAs('csv')),
+        PlatformMenuItem(label: t('exportTxt'), onSelected: () => _exportAs('txt')),
+        PlatformMenuItem(label: t('filePrint'), onSelected: _print),
+      ]),
+      PlatformMenu(label: 'View', menus: [
+        PlatformMenuItem(label: t('sidebar'), onSelected: _toggleSidebar),
+        PlatformMenuItem(label: t('split'), onSelected: _toggleSplit),
+      ]),
+      PlatformMenu(label: 'Window', menus: [
+        PlatformMenuItem(label: t('settings'), onSelected: _openSettings),
+      ]),
+    ];
+  }
+
+
+  /// Routes Edit menu items to whatever text field has focus.
+  void _textAction(Intent intent) {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx != null) Actions.maybeInvoke(ctx, intent);
+  }
+
+  void _openSettings() => showSettingsSheet(
+                              context: _navKey.currentContext!,
+                              dark: _dark,
+                              themeMode: _themeMode,
+                              answersVisible: _answersVisible,
+                              autoRates: _autoRates,
+                              steps: _steps,
+                              signColours: _signColours,
+                              lineNumbers: _lineNumbers,
+                              showTabs: _showTabs,
+                              uiScale: _uiScale,
+                              locale: _locale ?? _effectiveLocale,
+                              numberPreset: _numberPreset,
+                              onLocale: (v) {
+                                setState(() => _locale = v);
+                                _saveSettings();
+                              },
+                              onNumberPreset: (v) {
+                                setState(() => _numberPreset = v);
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
+                                _saveSettings();
+                              },
+                              posName: _posName,
+                              negName: _negName,
+                              onAnswers: (v) {
+                                setState(() => _answersVisible = v);
+                                _saveSettings();
+                              },
+                              onThemeMode: (v) {
+                                setState(() => _themeMode = v);
+                                _saveSettings();
+                              },
+                              haptics: _haptics,
+                              onHaptics: (v) {
+                                Haptics.on = v;
+                                setState(() => _haptics = v);
+                                _saveSettings();
+                              },
+                              onAutoRates: (v) {
+                                setState(() => _autoRates = v);
+                                _saveSettings();
+                              },
+                              onSteps: (v) {
+                                setState(() => _steps = v);
+                                _saveSettings();
+                              },
+                              keyBar: _keyBar,
+                              onKeyBar: (v) {
+                                setState(() => _keyBar = v);
+                                _saveSettings();
+                              },
+                              onSignColours: (v) {
+                                setState(() => _signColours = v);
+                                _saveSettings();
+                              },
+                              onPosColour: (name) {
+                                setState(() => _posName = name);
+                                _saveSettings();
+                              },
+                              onNegColour: (name) {
+                                setState(() => _negName = name);
+                                _saveSettings();
+                              },
+                              onLineNumbers: (v) {
+                                setState(() => _lineNumbers = v);
+                                _saveSettings();
+                              },
+                              onShowTabs: (v) {
+                                setState(() => _showTabs = v);
+                                _saveSettings();
+                              },
+                              onUiScale: (v) {
+                                setState(() => _uiScale = v);
+                                _saveSettings();
+                              },
+                              onRefreshRates: () async {
+                                final ok = await Rates.refresh();
+                                if (!mounted) return false;
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
+                                return ok;
+                              },
+                            );
+
   Future<void> _fileMenu() async {
     // Read the locale from inside LocaleScope: this State's own context sits
     // above it, so LocaleScope.of(context) silently fell back to English and
@@ -749,9 +901,15 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       wheelBlocked: _zoomModifier,
       searchFocus: _searchFocus,
       onClose: wide ? _toggleSidebar : () => Navigator.of(context).maybePop(),
+      onFile: _fileMenu,
+      onSplit: _toggleSplit,
+      onSettings: _openSettings,
+      splitActive: _split,
     );
 
-    return MaterialApp(
+    return PlatformMenuBar(
+      menus: _platformMenus,
+      child: MaterialApp(
       title: 'Numbook',
       debugShowCheckedModeBanner: false,
       locale: _materialLocale,
@@ -952,96 +1110,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                             showMenu: !(wide && _sidebarOpen),
                             split: _split,
                             onSplit: _toggleSplit,
+                            onFile: _fileMenu,
+                            onSettings: _openSettings,
                             onMenu: wide
                                 ? _toggleSidebar
                                 : () => _scaffoldKey.currentState?.openDrawer(),
-                            onFile: _fileMenu,
-                            onSettings: () => showSettingsSheet(
-                              context: _navKey.currentContext!,
-                              dark: _dark,
-                              themeMode: _themeMode,
-                              answersVisible: _answersVisible,
-                              autoRates: _autoRates,
-                              steps: _steps,
-                              signColours: _signColours,
-                              lineNumbers: _lineNumbers,
-                              showTabs: _showTabs,
-                              uiScale: _uiScale,
-                              locale: _locale ?? _effectiveLocale,
-                              numberPreset: _numberPreset,
-                              onLocale: (v) {
-                                setState(() => _locale = v);
-                                _saveSettings();
-                              },
-                              onNumberPreset: (v) {
-                                setState(() => _numberPreset = v);
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                _saveSettings();
-                              },
-                              posName: _posName,
-                              negName: _negName,
-                              onAnswers: (v) {
-                                setState(() => _answersVisible = v);
-                                _saveSettings();
-                              },
-                              onThemeMode: (v) {
-                                setState(() => _themeMode = v);
-                                _saveSettings();
-                              },
-                              haptics: _haptics,
-                              onHaptics: (v) {
-                                Haptics.on = v;
-                                setState(() => _haptics = v);
-                                _saveSettings();
-                              },
-                              onAutoRates: (v) {
-                                setState(() => _autoRates = v);
-                                _saveSettings();
-                              },
-                              onSteps: (v) {
-                                setState(() => _steps = v);
-                                _saveSettings();
-                              },
-                              keyBar: _keyBar,
-                              onKeyBar: (v) {
-                                setState(() => _keyBar = v);
-                                _saveSettings();
-                              },
-                              onSignColours: (v) {
-                                setState(() => _signColours = v);
-                                _saveSettings();
-                              },
-                              onPosColour: (name) {
-                                setState(() => _posName = name);
-                                _saveSettings();
-                              },
-                              onNegColour: (name) {
-                                setState(() => _negName = name);
-                                _saveSettings();
-                              },
-                              onLineNumbers: (v) {
-                                setState(() => _lineNumbers = v);
-                                _saveSettings();
-                              },
-                              onShowTabs: (v) {
-                                setState(() => _showTabs = v);
-                                _saveSettings();
-                              },
-                              onUiScale: (v) {
-                                setState(() => _uiScale = v);
-                                _saveSettings();
-                              },
-                              onRefreshRates: () async {
-                                final ok = await Rates.refresh();
-                                if (!mounted) return false;
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                return ok;
-                              },
-                            ),
                           ),
                           Divider(height: 1, color: Palette.hairline(_dark)),
                           if (tabsRow)
@@ -1135,7 +1208,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1271,57 +1344,36 @@ class _Header extends StatelessWidget {
                 onPressed: onMenu,
                 icon: Icon(Icons.menu, color: Palette.faint(dark)),
               ),
+            // The rail owns these icons when it is visible; a phone or a
+            // collapsed rail has no rail to reach, so keep them here.
+            if (!sidebarOpen) ...[
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'file'),
+                onPressed: onFile,
+                icon: Icon(Icons.folder_open_outlined, color: Palette.faint(dark)),
+              ),
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'split'),
+                onPressed: onSplit,
+                icon: Icon(Icons.vertical_split,
+                    color: split ? Palette.answer(dark) : Palette.faint(dark)),
+              ),
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'settings'),
+                onPressed: onSettings,
+                icon: Icon(Icons.tune, color: Palette.faint(dark)),
+              ),
+            ],
             const Spacer(),
-            _IconAction(
-              icon: Icons.folder_open_outlined,
-              tooltip: LocaleScope.t(context, 'file'),
-              dark: dark,
-              onTap: onFile,
-            ),
-            _IconAction(
-              icon: Icons.vertical_split,
-              tooltip: '${LocaleScope.t(context, 'split')}  ⌘⇧\\',
-              dark: dark,
-              active: split,
-              onTap: onSplit,
-            ),
-            _IconAction(
-              icon: Icons.tune,
-              tooltip: LocaleScope.t(context, 'settings'),
-              dark: dark,
-              onTap: onSettings,
-            ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _IconAction extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool dark;
-
-  /// On while the thing it toggles is on.
-  final bool active;
-  final VoidCallback onTap;
-
-  const _IconAction({
-    required this.icon,
-    required this.tooltip,
-    required this.dark,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      iconSize: 17,
-      tooltip: tooltip,
-      onPressed: onTap,
-      icon: Icon(icon, color: active ? Palette.fg(dark) : Palette.faint(dark)),
     );
   }
 }
