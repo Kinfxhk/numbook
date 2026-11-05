@@ -10,6 +10,7 @@ import 'io/file_actions.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data/document.dart';
@@ -410,57 +411,98 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   List<PlatformMenu> get _platformMenus {
     final l = _locale ?? _effectiveLocale;
     String t(String key) => T.of(l, key);
+    String on(bool v) => v ? '  ✓' : '';
+    PlatformMenuItem item(String label, {VoidCallback? onSelected, SingleActivator? shortcut}) {
+      return PlatformMenuItem(label: label, onSelected: onSelected, shortcut: shortcut);
+    }
+
     return [
       PlatformMenu(label: 'Edit', menus: [
-        PlatformMenuItem(
-          label: 'Undo',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
-          onSelected: () => _textAction(UndoTextIntent(SelectionChangedCause.keyboard)),
-        ),
-        PlatformMenuItem(
-          label: 'Redo',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true),
-          onSelected: () => _textAction(RedoTextIntent(SelectionChangedCause.keyboard)),
-        ),
-        PlatformMenuItem(
-          label: 'Cut',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyX, meta: true),
-          onSelected: () => _textAction(CopySelectionTextIntent.cut(SelectionChangedCause.keyboard)),
-        ),
-        PlatformMenuItem(
-          label: 'Copy',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyC, meta: true),
-          onSelected: () => _textAction(CopySelectionTextIntent.copy),
-        ),
-        PlatformMenuItem(
-          label: 'Paste',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyV, meta: true),
-          onSelected: () => _textAction(PasteTextIntent(SelectionChangedCause.keyboard)),
-        ),
-        PlatformMenuItem(
-          label: 'Select All',
-          shortcut: const SingleActivator(LogicalKeyboardKey.keyA, meta: true),
-          onSelected: () => _textAction(SelectAllTextIntent(SelectionChangedCause.keyboard)),
-        ),
+        item('Undo',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+            onSelected: () => _textAction(UndoTextIntent(SelectionChangedCause.keyboard))),
+        item('Redo',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true),
+            onSelected: () => _textAction(RedoTextIntent(SelectionChangedCause.keyboard))),
+        item('Cut',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyX, meta: true),
+            onSelected: () => _textAction(CopySelectionTextIntent.cut(SelectionChangedCause.keyboard))),
+        item('Copy',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyC, meta: true),
+            onSelected: () => _textAction(CopySelectionTextIntent.copy)),
+        item('Paste',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyV, meta: true),
+            onSelected: () => _textAction(PasteTextIntent(SelectionChangedCause.keyboard))),
+        item('Select All',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyA, meta: true),
+            onSelected: () => _textAction(SelectAllTextIntent(SelectionChangedCause.keyboard))),
+        item(t('search'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyF, meta: true),
+            onSelected: _focusSearch),
       ]),
       PlatformMenu(label: t('file'), menus: [
-        PlatformMenuItem(label: t('fileNew'), onSelected: () => _store.create()),
-        PlatformMenuItem(label: t('fileOpen'), onSelected: _openFromFile),
-        PlatformMenuItem(label: t('fileSaveCopy'), onSelected: _saveCopy),
-        PlatformMenuItem(label: t('exportMd'), onSelected: () => _exportAs('md')),
-        PlatformMenuItem(label: t('exportCsv'), onSelected: () => _exportAs('csv')),
-        PlatformMenuItem(label: t('exportTxt'), onSelected: () => _exportAs('txt')),
-        PlatformMenuItem(label: t('filePrint'), onSelected: _print),
+        item(t('fileNew'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyN, meta: true),
+            onSelected: () => _store.create()),
+        item(t('newFolder'), onSelected: () => _store.createFolder(t('newFolder'))),
+        item(t('fileOpen'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyO, meta: true),
+            onSelected: _openFromFile),
+        item(t('fileSaveCopy'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyS, meta: true, shift: true),
+            onSelected: _saveCopy),
+        item(t('exportMd'), onSelected: () => _exportAs('md')),
+        item(t('exportCsv'), onSelected: () => _exportAs('csv')),
+        item(t('exportTxt'), onSelected: () => _exportAs('txt')),
+        item(t('filePrint'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+            onSelected: _print),
       ]),
       PlatformMenu(label: 'View', menus: [
-        PlatformMenuItem(label: t('sidebar'), onSelected: _toggleSidebar),
-        PlatformMenuItem(label: t('split'), onSelected: _toggleSplit),
+        item(t('sidebar'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.backslash, meta: true),
+            onSelected: _toggleSidebar),
+        item(t('split'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.backslash, meta: true, shift: true),
+            onSelected: _toggleSplit),
+        item('${t('answers')}${on(_answersVisible)}', onSelected: () {
+          setState(() => _answersVisible = !_answersVisible);
+          _saveSettings();
+        }),
+        item('${t('lineNumbers')}${on(_lineNumbers)}', onSelected: () {
+          setState(() => _lineNumbers = !_lineNumbers);
+          _saveSettings();
+        }),
+        item('${t('showSteps')}${on(_steps)}', onSelected: () {
+          setState(() => _steps = !_steps);
+          _saveSettings();
+        }),
+        item('${t('followSystem')}${on(_themeMode == 'system')}',
+            onSelected: () => _setTheme('system')),
+        item('${t('light')}${on(_themeMode == 'light')}',
+            onSelected: () => _setTheme('light')),
+        item('${t('dark')}${on(_themeMode == 'dark')}',
+            onSelected: () => _setTheme('dark')),
       ]),
       PlatformMenu(label: 'Window', menus: [
-        PlatformMenuItem(label: t('settings'), onSelected: _openSettings),
+        item(t('settings'), onSelected: _openSettings),
+      ]),
+      PlatformMenu(label: 'Help', menus: [
+        item(t('supportPage'), onSelected: () => _openURL('https://kinfxhk.github.io/numbook/support.html')),
+        item(t('privacyPolicy'), onSelected: () => _openURL('https://kinfxhk.github.io/numbook/privacy.html')),
       ]),
     ];
   }
+
+  void _openURL(String url) {
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  void _setTheme(String mode) {
+    setState(() => _themeMode = mode);
+    _saveSettings();
+  }
+
 
 
   /// Routes Edit menu items to whatever text field has focus.
