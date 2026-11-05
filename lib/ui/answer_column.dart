@@ -144,9 +144,7 @@ AnswerColumnMetrics measureAnswers(
     }
     // Use the shared (capped) fraction slot, not the raw full tail — otherwise
     // one long fraction still widens every row past the stable anchor.
-    final after = p.fraction != null
-        ? fracW + width(p.suffix)
-        : fracW + width(p.suffix);
+    final after = fracW + width(p.suffix);
     numericW = math.max(numericW, headW + after);
   }
 
@@ -201,11 +199,14 @@ class AnswerReadout extends StatelessWidget {
     final child = LayoutBuilder(
       builder: (context, box) {
         final available = box.maxWidth.isFinite ? box.maxWidth : metrics.totalW;
-        final cappedFraction = metrics.capFracW != null &&
-            parts.fraction != null && parts.fraction!.length > 4;
+        final cappedFraction =
+            metrics.capFracW != null &&
+            parts.fraction != null &&
+            parts.fraction!.length > 4;
         // Keep the real font size. Values too wide for the decimal grid
         // remain one run with explicit ellipsis and full-value access.
-        final readout = !parts.aligns || metrics.totalW > available || cappedFraction
+        final readout =
+            !parts.aligns || metrics.totalW > available || cappedFraction
             ? SizedBox(width: available, child: _opaque(parts))
             : SizedBox(width: metrics.totalW, child: _aligned(parts));
         return Semantics(
@@ -242,8 +243,7 @@ class AnswerReadout extends StatelessWidget {
   Widget _aligned(AnswerParts parts) {
     final lead = metrics.totalW - metrics.numericW;
     // Cap matches measureAnswers' decimal+"9999" slot (~4 fraction digits).
-    final fracOverflow =
-        parts.fraction != null && parts.fraction!.length > 4;
+    final fracOverflow = parts.fraction != null && parts.fraction!.length > 4;
 
     return Row(
       textDirection: TextDirection.ltr,
@@ -268,7 +268,9 @@ class AnswerReadout extends StatelessWidget {
               ),
               if (parts.fraction != null)
                 SizedBox(
-                  width: metrics.fracW,
+                  // Measurement reserves suffix width beyond the fraction cap.
+                  // Let the tail use that space without moving the decimal anchor.
+                  width: metrics.numericW - metrics.headW,
                   child: Text(
                     fracOverflow
                         ? '${parts.decimalMark}${parts.fraction!.substring(0, 4)}…${parts.suffix}'

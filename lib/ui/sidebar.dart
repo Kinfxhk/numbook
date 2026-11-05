@@ -107,6 +107,17 @@ class _SidebarState extends State<Sidebar> {
                     ),
                   ),
                 ),
+                if (widget.onFile != null &&
+                    (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS))
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'file'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onFile,
+                    icon: Icon(Icons.folder_open_outlined, color: Palette.faint(_dark)),
+                  ),
                 if (widget.onSplit != null)
                   IconButton(
                     tooltip: LocaleScope.t(context, 'split'),
