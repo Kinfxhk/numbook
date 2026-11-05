@@ -23,6 +23,7 @@ void main() {
     expect(store.inFolder(work.id).single.id, sheet.id);
     expect(store.inFolder(null).every((s) => s.folderId == null), isTrue);
 
+    await store.flush();
     final again = DocumentStore();
     await again.load();
     expect(again.folders.single.name, 'Work');
@@ -70,6 +71,7 @@ void main() {
     expect(store.inFolder(null).first.id, a.id);
 
     store.rename(a.id, 'Budget 2027');
+    await store.flush();
     final again = DocumentStore();
     await again.load();
     final reloaded = again.sheets.firstWhere((x) => x.id == a.id);
@@ -126,12 +128,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Work'), findsOneWidget);
-    expect(find.text('Q4 budget'), findsOneWidget);
+    // the note title appears twice: once in the rail, once in its tab
+    expect(find.text('Q4 budget'), findsAtLeastNWidgets(1));
     expect(find.text('Loose note'), findsOneWidget);
     expect(find.text('Unfiled'), findsOneWidget);
 
     // tapping a sheet through Pressable still selects and loads it
-    await tester.tap(find.text('Q4 budget'));
+    await tester.tap(find.text('Q4 budget').first);
     await tester.pump(const Duration(milliseconds: 60));
     final editor = tester.widget<TextField>(
       find.descendant(

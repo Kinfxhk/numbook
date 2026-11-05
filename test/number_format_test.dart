@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tallynote/main.dart';
+import 'package:tallynote/ui/answer_column.dart';
 import 'package:tallynote/ui/editor_view.dart';
 
 /// The US/EU setting has to reach the engine, not just the settings dialog.
@@ -22,9 +23,13 @@ void main() {
     await tester.enterText(editor, '9,875+1');
     await tester.pump(const Duration(milliseconds: 80));
 
-    // 9.875 + 1, displayed with EU separators
-    expect(find.textContaining('10,875'), findsWidgets);
-    expect(find.textContaining('9,876'), findsNothing);
+    // 9.875 + 1, displayed with EU separators (split across AnswerReadout cells)
+    final euAnswers = tester
+        .widgetList<AnswerReadout>(find.byType(AnswerReadout))
+        .map((r) => r.display)
+        .toList();
+    expect(euAnswers, contains('10,875'));
+    expect(euAnswers, isNot(contains('9,876')));
   });
 
   testWidgets('US stays the default', (tester) async {

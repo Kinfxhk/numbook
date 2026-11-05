@@ -10,11 +10,14 @@ import 'io/file_actions.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data/document.dart';
 import 'data/rates.dart';
 import 'engine/engine.dart';
+import 'engine/presentation.dart';
+import 'ui/editor_paper.dart';
 import 'engine/values.dart';
 import 'ui/editor_pane.dart';
 import 'ui/feedback.dart';
@@ -23,6 +26,8 @@ import 'ui/key_bar.dart';
 import 'ui/settings_sheet.dart';
 import 'ui/sidebar.dart';
 import 'ui/theme.dart';
+
+part 'main_sidebar_divider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,6 +85,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   double _uiScale = 1.0;
   String? _locale; // null = follow the system
   String _numberPreset = 'us';
+  DisplayPrecision _displayPrecision = DisplayPrecision.auto;
+  PaperStyle _paperStyle = PaperStyle.plain;
+  bool _highlightCurrentLine = false;
+  double _sidebarW = 250;
+  bool _sidebarDragging = false;
+  double? _sidebarCancelRestore;
   bool _lineNumbers = true;
   bool _showTabs = true;
   final List<String> _tabs = [];
@@ -125,6 +136,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onKey);
     _paneA = _newPane('');
+    const MethodChannel('app.numbook/lifecycle').setMethodCallHandler((call) async {
+      if (call.method != 'prepareQuit') throw MissingPluginException();
+      _flush();
+      await _store.flush();
+      return true;
+    });
     unawaited(_boot());
   }
 
@@ -137,6 +154,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       explicitW: _answerWSet,
     )..addListener(_onPane);
     // an empty id means "not bound yet": _boot loads the active sheet into it
+    pane.setDisplayPrecision(_displayPrecision);
+    pane.setPaperAppearance(
+      style: _paperStyle,
+      highlightLine: _highlightCurrentLine,
+    );
     pane.load(sheetId);
     return pane;
   }
@@ -173,6 +195,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
     _numberPreset = prefs.getString('tallynote.numberFormat') ?? 'us';
+    _displayPrecision =
+        displayPrecisionFrom(prefs.getString('tallynote.displayPrecision'));
+    _paperStyle = paperStyleFrom(prefs.getString('tallynote.paperStyle'));
+    _highlightCurrentLine =
+        prefs.getBool('tallynote.highlightCurrentLine') ?? false;
+    _sidebarW = prefs.getDouble('tallynote.sidebarWidth') ?? 250;
     _lineNumbers = prefs.getBool('tallynote.lineNumbers') ?? true;
     _showTabs = prefs.getBool('tallynote.showTabs') ?? true;
     _signColours = prefs.getBool('tallynote.signColours') ?? true;
@@ -184,6 +212,10 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
     await _store.load();
     _store.addListener(_onStore);
+    // Seed the tab list: the tab is the document title, so even a single note
+    // must have one from the first frame.
+    final bootId = _store.activeId;
+    if (bootId != null && !_tabs.contains(bootId)) _tabs.add(bootId);
     // the left pane keeps its own sheet, so a restart does not swap the sides
     final first =
         splitOn &&
@@ -197,6 +229,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await Rates.load(allowNetwork: _autoRates);
     for (final p in _livePanes) {
       p.rebuildEngine();
+      p.setDisplayPrecision(_displayPrecision);
+      p.setPaperAppearance(
+        style: _paperStyle,
+        highlightLine: _highlightCurrentLine,
+      );
     }
     if (!mounted) return;
     setState(() {});
@@ -214,6 +251,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
         ? stored
         : _store.sheets.firstWhere((s) => s.id != active).id;
     _paneB = _newPane(second);
+  }
+
+  /// Open a note and give it a tab (the rail's normal tap).
+  void _openSheet(String id) {
+    if (!_tabs.contains(id)) {
+      setState(() => _tabs.add(id));
+    }
+    _store.select(id);
   }
 
   void _onStore() {
@@ -365,6 +410,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   void _closeTab(String id) {
+    // One tab is the document title: closing the last one would leave the
+    // window without a title or a way back.
+    if (_tabs.length <= 1) return;
     _tabs.remove(id);
     if (_store.activeId == id && _tabs.isNotEmpty) _store.select(_tabs.last);
     setState(() {});
@@ -403,6 +451,266 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       p.flush();
     }
   }
+
+
+  /// The macOS menu bar is the app's real menu: the in-window popup stays as a
+  /// convenience, but File/View/Window must exist in the system menu bar.
+  List<PlatformMenu> get _platformMenus {
+    final l = _locale ?? _effectiveLocale;
+    // PlatformProvidedMenuItem asserts when the running platform has no menu
+    // for it (widget tests build as android), so only emit them on macOS.
+    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+    String t(String key) => T.of(l, key);
+    String on(bool v) => v ? '  ✓' : '';
+    PlatformMenuItem item(String label, {VoidCallback? onSelected, SingleActivator? shortcut}) {
+      return PlatformMenuItem(label: label, onSelected: onSelected, shortcut: shortcut);
+    }
+
+    // The first menu becomes the app menu, so it must hold the app-level
+    // commands a Mac user looks for there: About, Settings ⌘,, Services,
+    // Hide/Quit. Everything else follows as real top-level menus.
+    return [
+      PlatformMenu(label: 'Numbook', menus: [
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
+        item(t('settings'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.comma, meta: true),
+            onSelected: _openSettings),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.servicesSubmenu),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hideOtherApplications),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.showAllApplications),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+      ]),
+      PlatformMenu(label: 'Edit', menus: [
+        item('Undo',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+            onSelected: () => _textAction(UndoTextIntent(SelectionChangedCause.keyboard))),
+        item('Redo',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true),
+            onSelected: () => _textAction(RedoTextIntent(SelectionChangedCause.keyboard))),
+        item('Cut',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyX, meta: true),
+            onSelected: () => _textAction(CopySelectionTextIntent.cut(SelectionChangedCause.keyboard))),
+        item('Copy',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyC, meta: true),
+            onSelected: () => _textAction(CopySelectionTextIntent.copy)),
+        item('Paste',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyV, meta: true),
+            onSelected: () => _textAction(PasteTextIntent(SelectionChangedCause.keyboard))),
+        item('Select All',
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyA, meta: true),
+            onSelected: () => _textAction(SelectAllTextIntent(SelectionChangedCause.keyboard))),
+        item(t('search'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyF, meta: true),
+            onSelected: _focusSearch),
+      ]),
+      PlatformMenu(label: t('file'), menus: [
+        item(t('fileNew'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyN, meta: true),
+            onSelected: () => _store.create()),
+        item(t('newFolder'), onSelected: () => _store.createFolder(t('newFolder'))),
+        item(t('fileOpen'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyO, meta: true),
+            onSelected: _openFromFile),
+        item(t('fileSaveCopy'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyS, meta: true, shift: true),
+            onSelected: _saveCopy),
+        item(t('exportMd'), onSelected: () => _exportAs('md')),
+        item(t('exportCsv'), onSelected: () => _exportAs('csv')),
+        item(t('exportTxt'), onSelected: () => _exportAs('txt')),
+        item(t('filePrint'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+            onSelected: _print),
+      ]),
+      PlatformMenu(label: 'View', menus: [
+        item(t('sidebar'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.backslash, meta: true),
+            onSelected: _toggleSidebar),
+        item(t('split'),
+            shortcut: const SingleActivator(LogicalKeyboardKey.backslash, meta: true, shift: true),
+            onSelected: _toggleSplit),
+        item('Zoom In',
+            shortcut: const SingleActivator(LogicalKeyboardKey.equal, meta: true),
+            onSelected: () => _zoom(1.1)),
+        item('Zoom Out',
+            shortcut: const SingleActivator(LogicalKeyboardKey.minus, meta: true),
+            onSelected: () => _zoom(1 / 1.1)),
+        item('Actual Size',
+            shortcut: const SingleActivator(LogicalKeyboardKey.digit0, meta: true),
+            onSelected: () => _setScale(1.0)),
+        item('${t('answers')}${on(_answersVisible)}', onSelected: () {
+          setState(() => _answersVisible = !_answersVisible);
+          _saveSettings();
+        }),
+        item(t('resetAnswerWidth'), onSelected: () {
+          setState(() {
+            _focused.resetAnswerWidth();
+            _answerW = _focused.answerW;
+            _answerWSet = false;
+          });
+          _saveSettings();
+        }),
+        item('${t('lineNumbers')}${on(_lineNumbers)}', onSelected: () {
+          setState(() => _lineNumbers = !_lineNumbers);
+          _saveSettings();
+        }),
+        item('${t('showSteps')}${on(_steps)}', onSelected: () {
+          setState(() => _steps = !_steps);
+          _saveSettings();
+        }),
+        item('${t('followSystem')}${on(_themeMode == 'system')}',
+            onSelected: () => _setTheme('system')),
+        item('${t('light')}${on(_themeMode == 'light')}',
+            onSelected: () => _setTheme('light')),
+        item('${t('dark')}${on(_themeMode == 'dark')}',
+            onSelected: () => _setTheme('dark')),
+      ]),
+      PlatformMenu(label: 'Window', menus: [
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.minimizeWindow),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.zoomWindow),
+        if (isMac) PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.arrangeWindowsInFront),
+      ]),
+      PlatformMenu(label: 'Help', menus: [
+        item(t('supportPage'), onSelected: () => _openURL('https://kinfxhk.github.io/numbook/support.html')),
+        item(t('privacyPolicy'), onSelected: () => _openURL('https://kinfxhk.github.io/numbook/privacy.html')),
+      ]),
+    ];
+  }
+
+
+  void _openURL(String url) {
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  void _setTheme(String mode) {
+    setState(() => _themeMode = mode);
+    _saveSettings();
+  }
+
+
+
+  /// Routes Edit menu items to whatever text field has focus.
+  void _textAction(Intent intent) {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx != null) Actions.maybeInvoke(ctx, intent);
+  }
+
+  void _openSettings() => showSettingsSheet(
+                              context: _navKey.currentContext!,
+                              dark: _dark,
+                              themeMode: _themeMode,
+                              answersVisible: _answersVisible,
+                              autoRates: _autoRates,
+                              steps: _steps,
+                              signColours: _signColours,
+                              lineNumbers: _lineNumbers,
+                              showTabs: _showTabs,
+                              uiScale: _uiScale,
+                              locale: _locale ?? _effectiveLocale,
+                              numberPreset: _numberPreset,
+                              displayPrecision:
+                                  displayPrecisionKey(_displayPrecision),
+                              paperStyle: paperStyleKey(_paperStyle),
+                              highlightCurrentLine: _highlightCurrentLine,
+                              onPaperStyle: (v) {
+                                setState(
+                                  () => _paperStyle = paperStyleFrom(v),
+                                );
+                                for (final p in _livePanes) {
+                                  p.setPaperAppearance(style: _paperStyle);
+                                }
+                                _saveSettings();
+                              },
+                              onHighlightCurrentLine: (v) {
+                                setState(() => _highlightCurrentLine = v);
+                                for (final p in _livePanes) {
+                                  p.setPaperAppearance(highlightLine: v);
+                                }
+                                _saveSettings();
+                              },
+                              onLocale: (v) {
+                                setState(() => _locale = v);
+                                _saveSettings();
+                              },
+                              onNumberPreset: (v) {
+                                setState(() => _numberPreset = v);
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
+                                _saveSettings();
+                              },
+                              onDisplayPrecision: (v) {
+                                setState(
+                                  () => _displayPrecision =
+                                      displayPrecisionFrom(v),
+                                );
+                                for (final p in _livePanes) {
+                                  p.setDisplayPrecision(_displayPrecision);
+                                }
+                                _saveSettings();
+                              },
+                              posName: _posName,
+                              negName: _negName,
+                              onAnswers: (v) {
+                                setState(() => _answersVisible = v);
+                                _saveSettings();
+                              },
+                              onThemeMode: (v) {
+                                setState(() => _themeMode = v);
+                                _saveSettings();
+                              },
+                              haptics: _haptics,
+                              onHaptics: (v) {
+                                Haptics.on = v;
+                                setState(() => _haptics = v);
+                                _saveSettings();
+                              },
+                              onAutoRates: (v) {
+                                setState(() => _autoRates = v);
+                                _saveSettings();
+                              },
+                              onSteps: (v) {
+                                setState(() => _steps = v);
+                                _saveSettings();
+                              },
+                              keyBar: _keyBar,
+                              onKeyBar: (v) {
+                                setState(() => _keyBar = v);
+                                _saveSettings();
+                              },
+                              onSignColours: (v) {
+                                setState(() => _signColours = v);
+                                _saveSettings();
+                              },
+                              onPosColour: (name) {
+                                setState(() => _posName = name);
+                                _saveSettings();
+                              },
+                              onNegColour: (name) {
+                                setState(() => _negName = name);
+                                _saveSettings();
+                              },
+                              onLineNumbers: (v) {
+                                setState(() => _lineNumbers = v);
+                                _saveSettings();
+                              },
+                              onShowTabs: (v) {
+                                setState(() => _showTabs = v);
+                                _saveSettings();
+                              },
+                              onUiScale: (v) {
+                                setState(() => _uiScale = v);
+                                _saveSettings();
+                              },
+                              onRefreshRates: () async {
+                                final ok = await Rates.refresh();
+                                if (!mounted) return false;
+                                for (final p in _livePanes) {
+                                  p.rebuildEngine();
+                                }
+                                return ok;
+                              },
+                            );
 
   Future<void> _fileMenu() async {
     // Read the locale from inside LocaleScope: this State's own context sits
@@ -486,10 +794,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     final base = _store.active?.title ?? 'tallynote';
     final engine = _makeEngine();
     final sheets = _store.sheets;
+    final precision = _displayPrecision;
     final (content, ext) = switch (kind) {
-      'md' => (DocumentIo.markdown(sheets, engine), 'md'),
-      'csv' => (DocumentIo.csv(sheets, engine), 'csv'),
-      _ => (DocumentIo.plainText(sheets, engine), 'txt'),
+      'md' => (DocumentIo.markdown(sheets, engine, precision: precision), 'md'),
+      'csv' => (DocumentIo.csv(sheets, engine, precision: precision), 'csv'),
+      _ => (DocumentIo.plainText(sheets, engine, precision: precision), 'txt'),
     };
     final name = DocumentIo.fileName(base, now, ext);
     final ok = await FileActions.saveAs(
@@ -507,7 +816,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   Future<void> _print() async {
     final messenger = ScaffoldMessenger.of(_navKey.currentContext!);
     try {
-      await FileActions.printSheets(_store.sheets, _makeEngine());
+      await FileActions.printSheets(_store.sheets, _makeEngine(), precision: _displayPrecision);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Could not print: $e')));
     }
@@ -562,6 +871,16 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
     await prefs.setString('tallynote.numberFormat', _numberPreset);
+    await prefs.setString(
+      'tallynote.displayPrecision',
+      displayPrecisionKey(_displayPrecision),
+    );
+    await prefs.setString('tallynote.paperStyle', paperStyleKey(_paperStyle));
+    await prefs.setBool(
+      'tallynote.highlightCurrentLine',
+      _highlightCurrentLine,
+    );
+    await prefs.setDouble('tallynote.sidebarWidth', _sidebarW);
     await prefs.setBool('tallynote.lineNumbers', _lineNumbers);
     await prefs.setBool('tallynote.showTabs', _showTabs);
     await prefs.setBool('tallynote.signColours', _signColours);
@@ -609,7 +928,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   /// when each one still gets the 340px a pane needs, stacked when it does not
   /// (a phone, or a tablet with the sidebar open).
   ///
-  /// [width] is the editor area, not the window: the sidebar takes 250px of it.
+  /// [width] is the editor area, not the window: the sidebar takes [_sidebarW] of it.
   Widget _panesView(double width) {
     final b = _paneB;
     if (b == null) {
@@ -702,10 +1021,13 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     onFocus: () => _focusPane(p),
     onPickSheet: _activate,
     onAnswerWidth: (w) {
-      _answerW = w;
-      _answerWSet = true;
+      setState(() {
+        _answerW = p.answerW;
+        _answerWSet = p.explicitW;
+      });
       _saveSettings();
     },
+    numberFormat: NumberFormat.ofPreset(_numberPreset),
   );
 
   @override
@@ -728,7 +1050,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     }
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final media = MediaQuery.of(context);
-    final tabsRow = _showTabs && _tabs.length > 1;
+    final tabsRow = _showTabs;
     // the key row plus a soft keyboard must never squeeze the editor under
     // 120dp: in landscape they would, so the row is the one that gives way
     final editorRoom =
@@ -746,12 +1068,20 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     final sidebar = Sidebar(
       store: _store,
       dark: _dark,
+      width: wide ? _sidebarW.clamp(180.0, media.size.width * 0.45) : 250,
       wheelBlocked: _zoomModifier,
       searchFocus: _searchFocus,
       onClose: wide ? _toggleSidebar : () => Navigator.of(context).maybePop(),
+      onFile: _fileMenu,
+      onSplit: _toggleSplit,
+      onSettings: _openSettings,
+      splitActive: _split,
+      onOpen: _openSheet,
     );
 
-    return MaterialApp(
+    return PlatformMenuBar(
+      menus: _platformMenus,
+      child: MaterialApp(
       title: 'Numbook',
       debugShowCheckedModeBanner: false,
       locale: _materialLocale,
@@ -872,13 +1202,13 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           const SingleActivator(
             LogicalKeyboardKey.keyS,
             meta: true,
-            shift: true,
+            alt: true,
           ): () =>
               _format('~~', '~~'),
           const SingleActivator(
             LogicalKeyboardKey.keyS,
             control: true,
-            shift: true,
+            alt: true,
           ): () =>
               _format('~~', '~~'),
           const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
@@ -941,109 +1271,74 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                   children: [
                     if (wide && _sidebarOpen) ...[
                       sidebar,
+                      _SidebarResizeDivider(
+                        dark: _dark,
+                        dragging: _sidebarDragging,
+                        width: _sidebarW,
+                        onDragStart: () => setState(() {
+                          _sidebarCancelRestore = _sidebarW;
+                          _sidebarDragging = true;
+                        }),
+                        onDrag: (dx) => setState(() {
+                          _sidebarW = (_sidebarW + dx).clamp(
+                            180.0,
+                            media.size.width * 0.45,
+                          );
+                        }),
+                        onDragEnd: () {
+                          setState(() {
+                            _sidebarDragging = false;
+                            _sidebarCancelRestore = null;
+                          });
+                          _saveSettings();
+                        },
+                        onDragCancel: () {
+                          setState(() {
+                            if (_sidebarCancelRestore != null) {
+                              _sidebarW = _sidebarCancelRestore!;
+                            }
+                            _sidebarDragging = false;
+                            _sidebarCancelRestore = null;
+                          });
+                        },
+                        onReset: () {
+                          setState(() => _sidebarW = 250);
+                          _saveSettings();
+                        },
+                        onNudge: (dx) {
+                          setState(() {
+                            _sidebarW = (_sidebarW + dx).clamp(
+                              180.0,
+                              media.size.width * 0.45,
+                            );
+                          });
+                          _saveSettings();
+                        },
+                      ),
                       VerticalDivider(width: 1, color: Palette.hairline(_dark)),
                     ],
                     Expanded(
                       child: Column(
                         children: [
-                          _Header(
-                            dark: _dark,
-                            sidebarOpen: _sidebarOpen && wide,
-                            showMenu: !(wide && _sidebarOpen),
-                            split: _split,
-                            onSplit: _toggleSplit,
-                            onMenu: wide
-                                ? _toggleSidebar
-                                : () => _scaffoldKey.currentState?.openDrawer(),
-                            onFile: _fileMenu,
-                            onSettings: () => showSettingsSheet(
-                              context: _navKey.currentContext!,
+                          // No rail means no in-window actions: the rail owns
+                          // them. Only a closed rail (or a phone) still needs
+                          // this strip for its menu button, so collapse it
+                          // entirely otherwise and let the tabs sit at the top.
+                          if (!(wide && _sidebarOpen)) ...[
+                            _Header(
                               dark: _dark,
-                              themeMode: _themeMode,
-                              answersVisible: _answersVisible,
-                              autoRates: _autoRates,
-                              steps: _steps,
-                              signColours: _signColours,
-                              lineNumbers: _lineNumbers,
-                              showTabs: _showTabs,
-                              uiScale: _uiScale,
-                              locale: _locale ?? _effectiveLocale,
-                              numberPreset: _numberPreset,
-                              onLocale: (v) {
-                                setState(() => _locale = v);
-                                _saveSettings();
-                              },
-                              onNumberPreset: (v) {
-                                setState(() => _numberPreset = v);
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                _saveSettings();
-                              },
-                              posName: _posName,
-                              negName: _negName,
-                              onAnswers: (v) {
-                                setState(() => _answersVisible = v);
-                                _saveSettings();
-                              },
-                              onThemeMode: (v) {
-                                setState(() => _themeMode = v);
-                                _saveSettings();
-                              },
-                              haptics: _haptics,
-                              onHaptics: (v) {
-                                Haptics.on = v;
-                                setState(() => _haptics = v);
-                                _saveSettings();
-                              },
-                              onAutoRates: (v) {
-                                setState(() => _autoRates = v);
-                                _saveSettings();
-                              },
-                              onSteps: (v) {
-                                setState(() => _steps = v);
-                                _saveSettings();
-                              },
-                              keyBar: _keyBar,
-                              onKeyBar: (v) {
-                                setState(() => _keyBar = v);
-                                _saveSettings();
-                              },
-                              onSignColours: (v) {
-                                setState(() => _signColours = v);
-                                _saveSettings();
-                              },
-                              onPosColour: (name) {
-                                setState(() => _posName = name);
-                                _saveSettings();
-                              },
-                              onNegColour: (name) {
-                                setState(() => _negName = name);
-                                _saveSettings();
-                              },
-                              onLineNumbers: (v) {
-                                setState(() => _lineNumbers = v);
-                                _saveSettings();
-                              },
-                              onShowTabs: (v) {
-                                setState(() => _showTabs = v);
-                                _saveSettings();
-                              },
-                              onUiScale: (v) {
-                                setState(() => _uiScale = v);
-                                _saveSettings();
-                              },
-                              onRefreshRates: () async {
-                                final ok = await Rates.refresh();
-                                if (!mounted) return false;
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                return ok;
-                              },
+                              sidebarOpen: false,
+                              showMenu: true,
+                              split: _split,
+                              onSplit: _toggleSplit,
+                              onFile: _fileMenu,
+                              onSettings: _openSettings,
+                              onMenu: wide
+                                  ? _toggleSidebar
+                                  : () => _scaffoldKey.currentState?.openDrawer(),
                             ),
-                          ),
-                          Divider(height: 1, color: Palette.hairline(_dark)),
+                            Divider(height: 1, color: Palette.hairline(_dark)),
+                          ],
                           if (tabsRow)
                             _TabBar(
                               dark: _dark,
@@ -1070,7 +1365,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                                 Positioned.fill(
                                   // the split's breakpoint is about the room
                                   // the editor has, so measure that, not the
-                                  // window: the sidebar eats 250px of it
+                                  // window: the sidebar eats [_sidebarW]px of it
                                   child: LayoutBuilder(
                                     builder: (context, box) =>
                                         _panesView(box.maxWidth),
@@ -1135,7 +1430,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -1271,57 +1566,36 @@ class _Header extends StatelessWidget {
                 onPressed: onMenu,
                 icon: Icon(Icons.menu, color: Palette.faint(dark)),
               ),
+            // The rail owns these icons when it is visible; a phone or a
+            // collapsed rail has no rail to reach, so keep them here.
+            if (!sidebarOpen) ...[
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'file'),
+                onPressed: onFile,
+                icon: Icon(Icons.folder_open_outlined, color: Palette.faint(dark)),
+              ),
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'split'),
+                onPressed: onSplit,
+                icon: Icon(Icons.vertical_split,
+                    color: split ? Palette.answer(dark) : Palette.faint(dark)),
+              ),
+              IconButton(
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                tooltip: LocaleScope.t(context, 'settings'),
+                onPressed: onSettings,
+                icon: Icon(Icons.tune, color: Palette.faint(dark)),
+              ),
+            ],
             const Spacer(),
-            _IconAction(
-              icon: Icons.folder_open_outlined,
-              tooltip: LocaleScope.t(context, 'file'),
-              dark: dark,
-              onTap: onFile,
-            ),
-            _IconAction(
-              icon: Icons.vertical_split,
-              tooltip: '${LocaleScope.t(context, 'split')}  ⌘⇧\\',
-              dark: dark,
-              active: split,
-              onTap: onSplit,
-            ),
-            _IconAction(
-              icon: Icons.tune,
-              tooltip: LocaleScope.t(context, 'settings'),
-              dark: dark,
-              onTap: onSettings,
-            ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _IconAction extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool dark;
-
-  /// On while the thing it toggles is on.
-  final bool active;
-  final VoidCallback onTap;
-
-  const _IconAction({
-    required this.icon,
-    required this.tooltip,
-    required this.dark,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      iconSize: 17,
-      tooltip: tooltip,
-      onPressed: onTap,
-      icon: Icon(icon, color: active ? Palette.fg(dark) : Palette.faint(dark)),
     );
   }
 }

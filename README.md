@@ -208,7 +208,7 @@ python3 tools/release.py upload --archive build/Numbook-asc.xcarchive
 python3 tools/release.py wait              # 等最新 build 離開 PROCESSING
 python3 tools/release.py compliance        # 宣告無非豁免加密
 python3 tools/release.py add-to-group      # 最新 VALID build 加入 KinFx 內部測試群組
-python3 tools/release.py full              # build → upload → wait → compliance → add-to-group
+python3 tools/release.py full              # build, upload, wait, compliance, add-to-group
 ```
 
 每日 09:00 的 Hermes cron `numbook-release-watch` 跑 `release.py watch`：有新 build 需要宣告合規或分發時才發通知，冇事就靜默。TestFlight 安裝新 build 仍需人手在 TestFlight app 撳一下（或開啟 TestFlight 自動更新）；macOS 冇 CLI 可以代撳。

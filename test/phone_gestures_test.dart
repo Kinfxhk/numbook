@@ -227,8 +227,10 @@ void main() {
         buttons: kSecondaryMouseButton,
       );
       await g.up();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copy displayed value'));
+      await tester.pumpAndSettle();
 
       expect(clipboard(), '5,000');
       expect(find.text('Copied'), findsOneWidget);

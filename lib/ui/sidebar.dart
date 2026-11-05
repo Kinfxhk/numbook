@@ -12,6 +12,16 @@ class Sidebar extends StatefulWidget {
   final VoidCallback onClose;
   final ValueListenable<bool>? wheelBlocked;
   final FocusNode? searchFocus;
+  /// Document controls live at the window's leading edge, the way a plain
+  /// notepad puts its toolbar: file, split view, settings.
+  final VoidCallback? onFile;
+  final VoidCallback? onSplit;
+  final VoidCallback? onSettings;
+  final bool splitActive;
+  /// Tapping a note in the rail. The app uses this to give the note a tab,
+  /// the way a browser keeps a tab per page.
+  final void Function(String id)? onOpen;
+  final double width;
 
   const Sidebar({
     super.key,
@@ -20,6 +30,12 @@ class Sidebar extends StatefulWidget {
     required this.onClose,
     this.wheelBlocked,
     this.searchFocus,
+    this.onFile,
+    this.onSplit,
+    this.onSettings,
+    this.splitActive = false,
+    this.onOpen,
+    this.width = 250,
   });
 
   @override
@@ -49,28 +65,89 @@ class _SidebarState extends State<Sidebar> {
     final phone = MediaQuery.sizeOf(context).width < 720;
 
     return Container(
-      width: 250,
+      width: widget.width,
       color: _dark ? const Color(0xFF141517) : const Color(0xFFF3F1EC),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 6, 4),
+            padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
             child: Row(
               children: [
-                Text(
-                  'Numbook',
-                  style: TextStyle(
-                    fontSize: 13,
-                    letterSpacing: 0.4,
-                    fontWeight: FontWeight.w600,
-                    color: Palette.faint(_dark),
+                Expanded(
+                  child: TextField(
+                    controller: _search,
+                    focusNode: widget.searchFocus,
+                    onChanged: (v) => setState(() => _query = v),
+                    style: TextStyle(fontSize: 12.5, color: Palette.fg(_dark)),
+                    cursorColor: Palette.answer(_dark),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      filled: true,
+                      fillColor: _dark
+                          ? const Color(0xFF232426)
+                          : const Color(0xFFE9E5DC),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                      hintText: LocaleScope.t(context, 'search'),
+                      hintStyle: TextStyle(
+                        fontSize: 12.5,
+                        color: Palette.faint(_dark),
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        size: 15,
+                        color: Palette.faint(_dark),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 26,
+                        minHeight: 20,
+                      ),
+                      border: InputBorder.none,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                if (widget.onFile != null &&
+                    (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS))
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'file'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onFile,
+                    icon: Icon(Icons.folder_open_outlined, color: Palette.faint(_dark)),
+                  ),
+                if (widget.onSplit != null)
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'split'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onSplit!,
+                    icon: Icon(Icons.vertical_split,
+                        color: widget.splitActive
+                            ? Palette.answer(_dark)
+                            : Palette.faint(_dark)),
+                  ),
+                if (widget.onSettings != null)
+                  IconButton(
+                    tooltip: LocaleScope.t(context, 'settings'),
+                    iconSize: 17,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                    onPressed: widget.onSettings!,
+                    icon: Icon(Icons.settings_outlined,
+                        color: Palette.faint(_dark)),
+                  ),
                 IconButton(
                   tooltip: LocaleScope.t(context, 'sidebar'),
                   iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                   onPressed: widget.onClose,
                   icon: Icon(
                     Icons.keyboard_double_arrow_left,
@@ -78,34 +155,6 @@ class _SidebarState extends State<Sidebar> {
                   ),
                 ),
               ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
-            child: TextField(
-              controller: _search,
-              focusNode: widget.searchFocus,
-              onChanged: (v) => setState(() => _query = v),
-              style: TextStyle(fontSize: 12.5, color: Palette.fg(_dark)),
-              cursorColor: Palette.answer(_dark),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: LocaleScope.t(context, 'search'),
-                hintStyle: TextStyle(
-                  fontSize: 12.5,
-                  color: Palette.faint(_dark),
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  size: 15,
-                  color: Palette.faint(_dark),
-                ),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 26,
-                  minHeight: 20,
-                ),
-                border: InputBorder.none,
-              ),
             ),
           ),
           Divider(height: 1, color: Palette.hairline(_dark)),
@@ -350,7 +399,12 @@ class _SidebarState extends State<Sidebar> {
           Expanded(
             child: Pressable(
               onTap: () {
-                _store.select(s.id);
+                final open = widget.onOpen;
+                if (open != null) {
+                  open(s.id);
+                } else {
+                  _store.select(s.id);
+                }
                 if (MediaQuery.sizeOf(context).width < 720) {
                   Navigator.of(context).maybePop();
                 }
@@ -612,3 +666,4 @@ class _SidebarState extends State<Sidebar> {
 }
 
 final ValueNotifier<bool> _neverSide = ValueNotifier<bool>(false);
+

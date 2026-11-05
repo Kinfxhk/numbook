@@ -134,6 +134,7 @@ String formatNumber(
   double v, {
   int? decimals,
   NumberFormat format = NumberFormat.us,
+  bool trimFraction = false,
 }) {
   if (v.isNaN) return 'NaN';
   if (v.isInfinite) return v > 0 ? '∞' : '-∞';
@@ -148,14 +149,14 @@ String formatNumber(
 
   if (s.contains('e')) {
     s = s.replaceAll(RegExp(r'0+e'), 'e').replaceAll(RegExp(r'\.e'), 'e');
-    return v < 0 ? '-$s' : s;
+    return s;
   }
 
   var parts = s.split('.');
   var intPart = parts[0];
   var frac = parts.length > 1 ? parts[1] : '';
   // strip trailing zeros only when no explicit decimal count was requested
-  if (decimals == null) {
+  if (decimals == null || trimFraction) {
     frac = frac.replaceFirst(RegExp(r'0+$'), '');
   }
   final neg = intPart.startsWith('-');
@@ -210,10 +211,16 @@ String formatValue(
   Value v, {
   int? decimals,
   NumberFormat format = NumberFormat.us,
+  bool trimFraction = false,
 }) {
   switch (v) {
     case NumValue(:final value, :final unit):
-      final n = formatNumber(value, decimals: decimals, format: format);
+      final n = formatNumber(
+        value,
+        decimals: decimals,
+        format: format,
+        trimFraction: trimFraction,
+      );
       if (unit == null) return n;
       return '$n ${_unitLabel(unit.id, value)}';
     case MoneyValue(:final value, :final currency):
@@ -221,6 +228,7 @@ String formatValue(
         value.abs(),
         decimals: decimals ?? 2,
         format: format,
+        trimFraction: trimFraction,
       );
       final sym = currencySymbols[currency] ?? '$currency ';
       final sign = value < 0 ? '-' : '';
@@ -228,7 +236,7 @@ String formatValue(
           ? '$sign$sym${formatNumber(value.abs().roundToDouble(), format: format)}'
           : '$sign$sym$n';
     case PercentValue(:final ratio):
-      return '${formatNumber(ratio * 100, decimals: decimals, format: format)}%';
+      return '${formatNumber(ratio * 100, decimals: decimals, format: format, trimFraction: trimFraction)}%';
     case DateValue(:final date, :final hasTime):
       return hasTime ? _fmtDateTime(date) : _fmtDate(date);
     case DurationValue(:final seconds):

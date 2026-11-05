@@ -90,11 +90,16 @@ class AnswerColumnMetrics {
   final double numericW;
   final double totalW;
 
+  /// Soft cap applied to fraction tails so one long decimal cannot shove
+  /// the shared anchor; rows that exceed it ellipsize with a tooltip.
+  final double? capFracW;
+
   const AnswerColumnMetrics({
     required this.headW,
     required this.fracW,
     required this.numericW,
     required this.totalW,
+    this.capFracW,
   });
 
   static const zero = AnswerColumnMetrics(
@@ -110,6 +115,7 @@ AnswerColumnMetrics measureAnswers(
   double Function(String text) measure, {
   String decimal = '.',
   String group = ',',
+  double? capFracW,
 }) {
   final parts = displays
       .map((d) => AnswerParts.parse(d, decimal: decimal, group: group))
@@ -118,12 +124,14 @@ AnswerColumnMetrics measureAnswers(
   double width(String text) => cache.putIfAbsent(text, () => measure(text));
 
   var headW = 0.0;
-  var fracW = 0.0;
+  var fracW = capFracW ?? 0.0;
   for (final p in parts) {
     if (!p.aligns) continue;
     headW = math.max(headW, width(p.head));
     if (p.fraction != null) {
-      fracW = math.max(fracW, width('${p.decimalMark}${p.fraction}'));
+      var tail = width('${p.decimalMark}${p.fraction}');
+      if (capFracW != null) tail = math.min(tail, capFracW);
+      fracW = math.max(fracW, tail);
     }
   }
 
@@ -134,9 +142,9 @@ AnswerColumnMetrics measureAnswers(
       opaqueW = math.max(opaqueW, width(p.raw));
       continue;
     }
-    final after = p.fraction != null
-        ? width(p.fractionTail)
-        : fracW + width(p.suffix);
+    // Use the shared (capped) fraction slot, not the raw full tail — otherwise
+    // one long fraction still widens every row past the stable anchor.
+    final after = fracW + width(p.suffix);
     numericW = math.max(numericW, headW + after);
   }
 
@@ -145,6 +153,7 @@ AnswerColumnMetrics measureAnswers(
     fracW: fracW,
     numericW: numericW,
     totalW: math.max(numericW, opaqueW),
+    capFracW: capFracW,
   );
 }
 
@@ -171,6 +180,9 @@ class AnswerReadout extends StatelessWidget {
   final String decimal;
   final String group;
 
+  /// Optional full-value tooltip when the visible text is truncated.
+  final String? detailTooltip;
+
   const AnswerReadout({
     super.key,
     required this.display,
@@ -178,19 +190,39 @@ class AnswerReadout extends StatelessWidget {
     required this.metrics,
     this.decimal = '.',
     this.group = ',',
+    this.detailTooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final parts = AnswerParts.parse(display, decimal: decimal, group: group);
-    return Semantics(
-      label: display,
-      container: true,
-      excludeSemantics: true,
-      child: SizedBox(
-        width: metrics.totalW,
-        child: parts.aligns ? _aligned(parts) : _opaque(parts),
-      ),
+    final child = LayoutBuilder(
+      builder: (context, box) {
+        final available = box.maxWidth.isFinite ? box.maxWidth : metrics.totalW;
+        final cappedFraction =
+            metrics.capFracW != null &&
+            parts.fraction != null &&
+            parts.fraction!.length > 4;
+        // Keep the real font size. Values too wide for the decimal grid
+        // remain one run with explicit ellipsis and full-value access.
+        final readout =
+            !parts.aligns || metrics.totalW > available || cappedFraction
+            ? SizedBox(width: available, child: _opaque(parts))
+            : SizedBox(width: metrics.totalW, child: _aligned(parts));
+        return Semantics(
+          label: display,
+          container: true,
+          excludeSemantics: true,
+          child: readout,
+        );
+      },
+    );
+    final tip = detailTooltip ?? display;
+    return Tooltip(
+      message: tip,
+      triggerMode: TooltipTriggerMode.manual,
+      waitDuration: const Duration(milliseconds: 400),
+      child: child,
     );
   }
 
@@ -201,6 +233,7 @@ class AnswerReadout extends StatelessWidget {
         parts.raw,
         maxLines: 1,
         softWrap: false,
+        overflow: TextOverflow.ellipsis,
         style: style,
         textDirection: TextDirection.ltr,
       ),
@@ -209,6 +242,9 @@ class AnswerReadout extends StatelessWidget {
 
   Widget _aligned(AnswerParts parts) {
     final lead = metrics.totalW - metrics.numericW;
+    // Cap matches measureAnswers' decimal+"9999" slot (~4 fraction digits).
+    final fracOverflow = parts.fraction != null && parts.fraction!.length > 4;
+
     return Row(
       textDirection: TextDirection.ltr,
       children: [
@@ -225,17 +261,26 @@ class AnswerReadout extends StatelessWidget {
                   textAlign: TextAlign.right,
                   maxLines: 1,
                   softWrap: false,
+                  overflow: TextOverflow.ellipsis,
                   style: style,
                   textDirection: TextDirection.ltr,
                 ),
               ),
               if (parts.fraction != null)
-                Text(
-                  parts.fractionTail,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: style,
-                  textDirection: TextDirection.ltr,
+                SizedBox(
+                  // Measurement reserves suffix width beyond the fraction cap.
+                  // Let the tail use that space without moving the decimal anchor.
+                  width: metrics.numericW - metrics.headW,
+                  child: Text(
+                    fracOverflow
+                        ? '${parts.decimalMark}${parts.fraction!.substring(0, 4)}…${parts.suffix}'
+                        : parts.fractionTail,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.clip,
+                    style: style,
+                    textDirection: TextDirection.ltr,
+                  ),
                 )
               else ...[
                 if (metrics.fracW > 0) SizedBox(width: metrics.fracW),
@@ -244,6 +289,7 @@ class AnswerReadout extends StatelessWidget {
                     parts.suffix,
                     maxLines: 1,
                     softWrap: false,
+                    overflow: TextOverflow.ellipsis,
                     style: style,
                     textDirection: TextDirection.ltr,
                   ),

@@ -170,13 +170,29 @@ class DocumentStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
+  Future<void> _writeChain = Future<void>.value();
+
+  /// Drain every earlier write, then persist the latest live pane contents.
+  /// Call after flushing editor debounces and before acknowledging app exit.
+  Future<void> flush() async {
+    await _persist();
+    if (_keepBackup || saveFailed) {
+      throw StateError('Document could not be saved; quit was cancelled.');
+    }
+  }
+
+  Future<void> _persist() {
+    _writeChain = _writeChain.then((_) => _writeCurrentState());
+    return _writeChain;
+  }
+
+  Future<void> _writeCurrentState() async {
     // the backup is all that is left of the damaged store: do not bury it
     if (_keepBackup) return;
-    final prefs = await SharedPreferences.getInstance();
     var ok = false;
     try {
-      ok = await prefs.setString(
+      final prefs = await SharedPreferences.getInstance();
+      final documentSaved = await prefs.setString(
         _key,
         jsonEncode({
           'v': 2,
@@ -184,18 +200,18 @@ class DocumentStore extends ChangeNotifier {
           'sheets': sheets.map((s) => s.toJson()).toList(),
         }),
       );
+      final activeSaved =
+          activeId == null || await prefs.setString(_activeKey, activeId!);
+      ok = documentSaved && activeSaved;
     } catch (e) {
-      // a full quota or a private window can throw instead of returning false
+      // Handle every backend operation so a rejected future cannot poison
+      // the serialized save chain. flush still refuses quit via saveFailed.
       debugPrint('tallynote: save failed: $e');
     }
-    if (!ok && !saveFailed) {
-      saveFailed = true;
-      notifyListeners();
-    } else if (ok && saveFailed) {
-      saveFailed = false;
+    if (saveFailed == ok) {
+      saveFailed = !ok;
       notifyListeners();
     }
-    if (activeId != null) await prefs.setString(_activeKey, activeId!);
   }
 
   void select(String id) {
@@ -205,12 +221,7 @@ class DocumentStore extends ChangeNotifier {
   }
 
   Sheet create({String? folderId}) {
-    final s = Sheet(
-      id: _newId(),
-      title: '',
-      content: '',
-      folderId: folderId,
-    );
+    final s = Sheet(id: _newId(), title: '', content: '', folderId: folderId);
     sheets.insert(0, s);
     activeId = s.id;
     notifyListeners();
