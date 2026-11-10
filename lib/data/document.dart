@@ -114,7 +114,24 @@ class DocumentStore extends ChangeNotifier {
       ? null
       : folders.where((f) => f.id == s.folderId).firstOrNull;
 
-  Future<void> load() async {
+  Future<void>? _loadOnce;
+
+  /// One in-flight read. Quit can call this again while startup is still in
+  /// the first read; a second decode would race the first. A failed read can
+  /// be tried again; a finished one is not repeated.
+  Future<void> load() {
+    if (loaded) return Future<void>.value();
+    final existing = _loadOnce;
+    if (existing != null) return existing;
+    Future<void>? run;
+    run = _loadFromDisk().whenComplete(() {
+      if (!loaded && identical(_loadOnce, run)) _loadOnce = null;
+    });
+    _loadOnce = run;
+    return run;
+  }
+
+  Future<void> _loadFromDisk() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     if (raw != null) {
@@ -174,7 +191,23 @@ class DocumentStore extends ChangeNotifier {
 
   /// Drain every earlier write, then persist the latest live pane contents.
   /// Call after flushing editor debounces and before acknowledging app exit.
+  ///
+  /// Refuses to run before [load] has copied the on-disk library into memory.
+  /// The sheet list is empty until then, and writing it would report a
+  /// successful save of a document with no notes.
   Future<void> flush() async {
+    final loading = _loadOnce;
+    if (!loaded && loading != null) {
+      try {
+        await loading;
+      } catch (_) {
+        // The failed read leaves [loaded] false. The check below cancels quit
+        // instead of storing the empty list.
+      }
+    }
+    if (!loaded) {
+      throw StateError('Document could not be saved; quit was cancelled.');
+    }
     await _persist();
     if (_keepBackup || saveFailed) {
       throw StateError('Document could not be saved; quit was cancelled.');
@@ -187,8 +220,10 @@ class DocumentStore extends ChangeNotifier {
   }
 
   Future<void> _writeCurrentState() async {
-    // the backup is all that is left of the damaged store: do not bury it
-    if (_keepBackup) return;
+    // The in-memory list is empty until load() finishes. Writing it replaces
+    // the stored library with no sheets. A damaged store's backup is the only
+    // remaining copy: do not bury that either.
+    if (!loaded || _keepBackup) return;
     var ok = false;
     try {
       final prefs = await SharedPreferences.getInstance();

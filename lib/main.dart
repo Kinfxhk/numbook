@@ -138,6 +138,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _paneA = _newPane('');
     const MethodChannel('app.numbook/lifecycle').setMethodCallHandler((call) async {
       if (call.method != 'prepareQuit') throw MissingPluginException();
+      // Registered before _boot reaches load(). Flushing first would write the
+      // still-empty sheet list and tell macOS the save succeeded.
+      await _store.load();
       _flush();
       await _store.flush();
       return true;
