@@ -1,11 +1,17 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/presentation.dart';
+import '../engine/values.dart';
 import '../i18n/strings.dart';
+import 'answer_column.dart';
+import 'editor_paper.dart';
 import 'editor_view.dart';
 import 'feedback.dart';
 import 'folding.dart';
@@ -34,6 +40,12 @@ class PaneState extends ChangeNotifier {
   double answerW;
   bool dirty = false;
   DateTime? lastSaved;
+  DisplayPrecision displayPrecision = DisplayPrecision.auto;
+  PaperStyle paperStyle = PaperStyle.plain;
+  bool highlightCurrentLine = false;
+
+  /// True while the answer divider is being dragged (skip width tween).
+  bool widthDragging = false;
 
   /// True once the rule was dragged or auto-fitted: the width is then the
   /// user's, and may take room from the text (see editorMetrics).
@@ -112,13 +124,52 @@ class PaneState extends ChangeNotifier {
     recalc();
   }
 
+  void setDisplayPrecision(DisplayPrecision precision) {
+    if (displayPrecision == precision) return;
+    displayPrecision = precision;
+    recalc();
+  }
+
+  void setPaperAppearance({
+    PaperStyle? style,
+    bool? highlightLine,
+  }) {
+    var changed = false;
+    if (style != null && paperStyle != style) {
+      paperStyle = style;
+      changed = true;
+    }
+    if (highlightLine != null && highlightCurrentLine != highlightLine) {
+      highlightCurrentLine = highlightLine;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  void setWidthDragging(bool dragging) {
+    if (widthDragging == dragging) return;
+    widthDragging = dragging;
+    _notify();
+  }
+
+  void resetAnswerWidth({double defaultWidth = 212}) {
+    answerW = defaultWidth;
+    explicitW = false;
+    widthDragging = false;
+    _notify();
+  }
+
   void recalc() {
     // markers are presentation only: the engine sees plain arithmetic
     final lines = controller.text
         .split('\n')
         .map(Fmt.stripMarkers)
         .toList(growable: false);
-    results = engine.evaluate(lines);
+    results = presentResults(
+      engine.evaluate(lines),
+      displayPrecision,
+      engine.format,
+    );
     _notify();
   }
 
@@ -294,6 +345,7 @@ class EditorPane extends StatelessWidget {
 
   /// Only the right pane offers "close split" in its menu.
   final VoidCallback? onUnsplit;
+  final NumberFormat numberFormat;
 
   const EditorPane({
     super.key,
@@ -313,6 +365,7 @@ class EditorPane extends StatelessWidget {
     this.negativeColour,
     this.wheelBlocked,
     this.onUnsplit,
+    this.numberFormat = NumberFormat.us,
   });
 
   @override
@@ -349,9 +402,32 @@ class EditorPane extends StatelessWidget {
         // On touch the band leans into the answers: centred on the rule it
         // would cover the last text column, and the caret took the gesture.
         final hairIn = touch ? hitW * 0.7 : hitW / 2;
+        double measureFit() {
+          final painted = DefaultTextStyle.of(context).style
+              .merge(answerStyle(dark, scale: 1));
+          final scaler = MediaQuery.textScalerOf(context);
+          final stepGutter = em.tight ? 0.0 : 30.0;
+          final displays =
+              pane.results.map((r) => r.display).whereType<String>();
+          final m = measureAnswers(
+            displays,
+            (s) => measureAnswerText(s, painted, scaler),
+            decimal: numberFormat.decimal,
+            group: numberFormat.group,
+            capFracW: measureAnswerText(
+              '${numberFormat.decimal}9999',
+              painted,
+              scaler,
+            ),
+          );
+          return (m.totalW + stepGutter + 12).clamp(96.0, em.cap);
+        }
+
         return TweenAnimationBuilder<double>(
           tween: Tween(end: target),
-          duration: const Duration(milliseconds: 140),
+          duration: pane.widthDragging
+              ? Duration.zero
+              : const Duration(milliseconds: 140),
           curve: Curves.easeOut,
           builder: (context, w, _) {
             final m = editorMetrics(
@@ -388,6 +464,9 @@ class EditorPane extends StatelessWidget {
                     signColours: signColours,
                     positiveColour: positiveColour,
                     negativeColour: negativeColour,
+                    numberFormat: numberFormat,
+                    paperStyle: pane.paperStyle,
+                    highlightCurrentLine: pane.highlightCurrentLine,
                   ),
                 ),
                 if (answersVisible)
@@ -406,6 +485,7 @@ class EditorPane extends StatelessWidget {
                       hasAnswers: hasAnswers,
                       shown: m.answerW,
                       onAnswerWidth: onAnswerWidth,
+                      measureFit: measureFit,
                     ),
                   ),
               ],
@@ -599,6 +679,7 @@ class _AnswerDivider extends StatefulWidget {
   final double shown;
 
   final ValueChanged<double> onAnswerWidth;
+  final double Function() measureFit;
 
   const _AnswerDivider({
     super.key,
@@ -610,6 +691,7 @@ class _AnswerDivider extends StatefulWidget {
     required this.hasAnswers,
     required this.shown,
     required this.onAnswerWidth,
+    required this.measureFit,
   });
 
   @override
@@ -620,20 +702,20 @@ class _AnswerDividerState extends State<_AnswerDivider> {
   double _from = 0;
   double _base = 0;
   double _total = 0;
+  double? _cancelRestore;
+  bool? _cancelExplicit;
+  bool _hover = false;
 
-  int get _widest => widget.pane.results
-      .map((r) => r.display?.length ?? 0)
-      .fold<int>(0, (a, b) => a > b ? a : b);
+  static const _minReadable = 96.0;
+  static const _nudge = 8.0;
 
-  /// The narrowest that still shows the widest answer whole — but never wider
-  /// than where the drag started, or grabbing the rule would jump it.
-  double get _minW {
-    if (!widget.hasAnswers) return 96;
-    return (_widest * 9.2 + 60).clamp(140.0, 520.0);
-  }
+  double get _minW => widget.hasAnswers ? _minReadable : _minReadable;
 
   void _begin(double x) {
+    _cancelRestore = widget.shown;
+    _cancelExplicit = widget.pane.explicitW;
     widget.pane.grabWidth();
+    widget.pane.setWidthDragging(true);
     _from = x;
     _total = 0;
     _base = widget.shown;
@@ -642,67 +724,157 @@ class _AnswerDividerState extends State<_AnswerDivider> {
   void _drag(double x) {
     _total += x - _from;
     _from = x;
-    final lo = _minW < _base ? _minW : _base;
+    final lo = math.min(_minW, _base);
     final hi = widget.cap < lo ? lo : widget.cap;
     widget.pane.setAnswerWidth((_base - _total).clamp(lo, hi));
   }
 
-  void _end() => widget.onAnswerWidth(widget.pane.answerW);
+  void _end() {
+    widget.pane.setWidthDragging(false);
+    _cancelRestore = null;
+    _cancelExplicit = null;
+    widget.onAnswerWidth(widget.pane.answerW);
+  }
+
+  void _cancel() {
+    final restore = _cancelRestore;
+    final wasExplicit = _cancelExplicit;
+    if (restore != null) {
+      widget.pane.adoptWidth(restore, wasExplicit ?? false);
+    }
+    widget.pane.setWidthDragging(false);
+    _cancelRestore = null;
+    _cancelExplicit = null;
+  }
+
+  void _nudgeBy(double delta) {
+    widget.pane.grabWidth();
+    final lo = _minW;
+    final hi = widget.cap < lo ? lo : widget.cap;
+    widget.pane.setAnswerWidth((widget.shown + delta).clamp(lo, hi));
+    widget.onAnswerWidth(widget.pane.answerW);
+  }
 
   @override
   Widget build(BuildContext context) {
     final hairline = Palette.hairline(widget.dark);
-    return MouseRegion(
-      cursor: SystemMouseCursors.resizeColumn,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onHorizontalDragStart: (d) => _begin(d.globalPosition.dx),
-        onHorizontalDragUpdate: (d) => _drag(d.globalPosition.dx),
-        onHorizontalDragEnd: (_) => _end(),
-        // a thumb settles before it pulls: hold, then drag
-        onLongPressStart: (d) => _begin(d.globalPosition.dx),
-        onLongPressMoveUpdate: (d) => _drag(d.globalPosition.dx),
-        onLongPressEnd: (_) => _end(),
-        onDoubleTap: () {
-          widget.pane.setAnswerWidth((_widest * 9.2 + 44).clamp(140.0, 520.0));
-          _end();
-        },
-        child: Stack(
-          children: [
-            Positioned(
-              top: 0,
-              bottom: 0,
-              right: widget.hairIn - 0.5,
-              width: 1,
-              child: Container(width: 1, color: hairline),
-            ),
-            // discoverability without a new colour: the rule thickens a little
-            // where it can be pulled, while this pane has the caret
-            if (widget.touch)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: widget.hairIn - 1,
-                width: 2,
-                child: ListenableBuilder(
-                  listenable: widget.pane.focus,
-                  builder: (context, _) => !widget.pane.focus.hasFocus
-                      ? const SizedBox.shrink()
-                      : Center(
-                          child: Container(
-                            width: 2,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: hairline,
-                              borderRadius: BorderRadius.circular(1),
-                            ),
-                          ),
-                        ),
-                ),
+    return FocusableActionDetector(
+      actions: {
+        _NudgeAnswerIntent: CallbackAction<_NudgeAnswerIntent>(
+          onInvoke: (i) {
+            _nudgeBy(i.delta);
+            return null;
+          },
+        ),
+        _ResetAnswerIntent: CallbackAction<_ResetAnswerIntent>(
+          onInvoke: (_) {
+            widget.pane.resetAnswerWidth();
+            widget.onAnswerWidth(widget.pane.answerW);
+            return null;
+          },
+        ),
+        _FitAnswerIntent: CallbackAction<_FitAnswerIntent>(
+          onInvoke: (_) {
+            widget.pane.setAnswerWidth(widget.measureFit());
+            widget.onAnswerWidth(widget.pane.answerW);
+            return null;
+          },
+        ),
+      },
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.arrowLeft): _NudgeAnswerIntent(8),
+        SingleActivator(LogicalKeyboardKey.arrowRight): _NudgeAnswerIntent(-8),
+        SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
+            _NudgeAnswerIntent(24),
+        SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+            _NudgeAnswerIntent(-24),
+        SingleActivator(LogicalKeyboardKey.keyR): _ResetAnswerIntent(),
+        SingleActivator(LogicalKeyboardKey.keyF): _FitAnswerIntent(),
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Tooltip(
+          message: LocaleScope.t(context, 'answerDividerHint'),
+          waitDuration: const Duration(milliseconds: 500),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: (d) => _begin(d.globalPosition.dx),
+            onHorizontalDragUpdate: (d) => _drag(d.globalPosition.dx),
+            onHorizontalDragEnd: (_) => _end(),
+            onHorizontalDragCancel: _cancel,
+            onLongPressStart: (d) => _begin(d.globalPosition.dx),
+            onLongPressMoveUpdate: (d) => _drag(d.globalPosition.dx),
+            onLongPressEnd: (_) => _end(),
+            onLongPressCancel: _cancel,
+            onDoubleTap: () {
+              widget.pane.setAnswerWidth(widget.measureFit());
+              _end();
+            },
+            child: Semantics(
+              label: LocaleScope.t(context, 'answerDivider'),
+              hint: LocaleScope.t(context, 'answerDividerHint'),
+              slider: true,
+              value: widget.shown.toStringAsFixed(0),
+              increasedValue: (widget.shown + _nudge).toStringAsFixed(0),
+              decreasedValue: (widget.shown - _nudge).toStringAsFixed(0),
+              onIncrease: () => _nudgeBy(_nudge),
+              onDecrease: () => _nudgeBy(-_nudge),
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: widget.hairIn - 0.5,
+                    width: _hover || widget.pane.widthDragging ? 2 : 1,
+                    child: Container(
+                      key: const ValueKey('answer-rule'),
+                      width: _hover || widget.pane.widthDragging ? 2 : 1,
+                      color: hairline,
+                    ),
+                  ),
+                  if (widget.touch)
+                    Positioned(
+                      top: 0,
+                      bottom: 0,
+                      right: widget.hairIn - 1,
+                      width: 2,
+                      child: ListenableBuilder(
+                        listenable: widget.pane.focus,
+                        builder: (context, _) => !widget.pane.focus.hasFocus
+                            ? const SizedBox.shrink()
+                            : Center(
+                                child: Container(
+                                  width: 2,
+                                  height: 24,
+                                  decoration: BoxDecoration(
+                                    color: hairline,
+                                    borderRadius: BorderRadius.circular(1),
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+class _NudgeAnswerIntent extends Intent {
+  final double delta;
+  const _NudgeAnswerIntent(this.delta);
+}
+
+class _ResetAnswerIntent extends Intent {
+  const _ResetAnswerIntent();
+}
+
+class _FitAnswerIntent extends Intent {
+  const _FitAnswerIntent();
 }

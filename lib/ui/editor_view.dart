@@ -6,8 +6,10 @@ import 'package:flutter/services.dart';
 
 import '../engine/engine.dart';
 import '../i18n/strings.dart';
+import '../engine/presentation.dart';
 import '../engine/values.dart';
 import 'answer_column.dart';
+import 'editor_paper.dart';
 import 'feedback.dart';
 import 'theme.dart';
 
@@ -166,6 +168,9 @@ class EditorView extends StatefulWidget {
   /// The user set this width by hand, so it may take room from the text.
   final bool explicit;
 
+  final PaperStyle paperStyle;
+  final bool highlightCurrentLine;
+
   const EditorView({
     super.key,
     required this.controller,
@@ -193,6 +198,8 @@ class EditorView extends StatefulWidget {
     this.negativeColour,
     this.numberFormat = NumberFormat.us,
     this.explicit = false,
+    this.paperStyle = PaperStyle.plain,
+    this.highlightCurrentLine = false,
   });
 
   @override
@@ -208,7 +215,14 @@ class _EditorViewState extends State<EditorView> {
 
   /// Line tops from the last build, so the caret can be scrolled into view.
   List<double> _tops = const [];
+  double _rowHeight = 28;
   double _lastHeight = 0;
+
+  @visibleForTesting
+  List<double> get debugLogicalLineTops => _tops;
+
+  @visibleForTesting
+  double? debugTextMaxWidth;
 
   @override
   void initState() {
@@ -252,12 +266,14 @@ class _EditorViewState extends State<EditorView> {
       final sel = widget.controller.selection;
       if (!sel.isValid) return;
       final caret = sel.extentOffset.clamp(0, widget.controller.text.length);
-      final line = '\n'.allMatches(widget.controller.text.substring(0, caret)).length;
+      final line = '\n'
+          .allMatches(widget.controller.text.substring(0, caret))
+          .length;
       if (line >= _tops.length) return;
       final top = _tops[line];
       final pos = _scroll.position;
       final view = pos.viewportDimension;
-      const lineH = 28.0;
+      final lineH = _rowHeight;
       final low = pos.pixels + 8;
       final high = pos.pixels + view - lineH - 8;
       if (top >= low && top <= high) return;
@@ -291,19 +307,49 @@ class _EditorViewState extends State<EditorView> {
         }
         final text = widget.controller.text;
         final textWidth = constraints.maxWidth - answerW - gutterW - m.padH * 2;
-        final tops = _lineTops(text, style, textWidth < 80 ? 80 : textWidth);
-        _tops = tops;
+        final maxTextW = textWidth < 80 ? 80.0 : textWidth;
+        debugTextMaxWidth = maxTextW;
+        final scaler = MediaQuery.textScalerOf(context);
+        final mergedStyle = DefaultTextStyle.of(context).style.merge(style);
+        final layout = measureEditorTextLayout(
+          text: text,
+          style: mergedStyle,
+          maxWidth: maxTextW,
+          scale: widget.scale,
+          textScaler: scaler,
+          textDirection: Directionality.of(context),
+        );
+        _tops = layout.logicalLineTops;
+        _rowHeight = layout.rowHeight;
+        int? highlightLine;
+        if (widget.highlightCurrentLine &&
+            !widget.readOnly &&
+            _focus.hasFocus &&
+            widget.controller.selection.isValid &&
+            widget.controller.selection.isCollapsed) {
+          final caret = widget.controller.selection.extentOffset.clamp(
+            0,
+            text.length,
+          );
+          highlightLine = '\n'.allMatches(text.substring(0, caret)).length;
+        }
+
         // Text merges the ambient style at paint time. Measure that same
         // face, or a theme letter-spacing shows up only in the glyphs and
         // the row overflows by a fraction of a character.
         final painted = DefaultTextStyle.of(context).style
             .merge(answerStyle(widget.dark, scale: widget.scale));
+        final capFrac = measureAnswerText(
+          '${widget.numberFormat.decimal}9999',
+          painted,
+          scaler,
+        );
         final metrics = measureAnswers(
           widget.results.map((r) => r.display).whereType<String>(),
-          (s) =>
-              measureAnswerText(s, painted, MediaQuery.textScalerOf(context)),
+          (s) => measureAnswerText(s, painted, scaler),
           decimal: widget.numberFormat.decimal,
           group: widget.numberFormat.group,
+          capFracW: capFrac,
         );
 
         return DragTarget<int>(
@@ -313,12 +359,41 @@ class _EditorViewState extends State<EditorView> {
             controller: _scroll,
             padding: EdgeInsets.fromLTRB(m.padH, 12, m.padH, 96),
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
+                // Positioned decoration may fill the blank viewport without
+                // contributing to the text's scroll extent.
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: math.max(
+                    layout.contentHeight,
+                    constraints.maxHeight - 12,
+                  ),
+                  child: AnimatedBuilder(
+                    animation: _scroll,
+                    builder: (context, _) => IgnorePointer(
+                      child: CustomPaint(
+                        painter: EditorPaperPainter(
+                          dark: widget.dark,
+                          paperStyle: widget.paperStyle,
+                          layout: layout,
+                          highlightLogicalLine: highlightLine,
+                          highlightEnabled: widget.highlightCurrentLine,
+                          textLeft: gutterW,
+                          scrollOffset: _scroll.hasClients ? _scroll.offset : 0,
+                          viewportHeight: constraints.maxHeight,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
                 // faint line numbers, aligned with the same text metrics
                 if (widget.showLineNumbers)
                   for (var i = 0; i < widget.results.length; i++)
                     Positioned(
-                      top: (tops.length > i ? tops[i] : 0) + 6,
+                      top: (_tops.length > i ? _tops[i] : 0) + 6,
                       left: 0,
                       width: gutterW - _numberGap,
                       // tap picks the whole line, a long press folds it —
@@ -354,12 +429,7 @@ class _EditorViewState extends State<EditorView> {
                     focusNode: _focus,
                     maxLines: null,
                     style: style,
-                    strutStyle: StrutStyle(
-                      fontFamily: monoFamily,
-                      fontSize: 15,
-                      height: 28 / 15,
-                      forceStrutHeight: true,
-                    ),
+                    strutStyle: editorStrutStyle(scale: widget.scale),
                     readOnly: widget.readOnly,
                     cursorColor: Palette.answer(widget.dark),
                     cursorWidth: 1.6,
@@ -382,12 +452,9 @@ class _EditorViewState extends State<EditorView> {
                     if (widget.results[i].display != null ||
                         widget.results[i].engineError)
                       Positioned(
-                        top: (tops.length > i ? tops[i] : 0),
+                        top: (_tops.length > i ? _tops[i] : 0),
                         right: 0,
-                        // never clip: the decimal grid needs its full width
-                        width: answerW < metrics.totalW + stepGutter
-                            ? metrics.totalW + stepGutter
-                            : answerW,
+                        width: answerW,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           crossAxisAlignment: CrossAxisAlignment.center,
@@ -396,7 +463,7 @@ class _EditorViewState extends State<EditorView> {
                             // never move because of it
                             SizedBox(
                               width: stepGutter,
-                              height: 28,
+                              height: layout.rowHeight,
                               child:
                                   (widget.showSteps &&
                                       widget.explain != null &&
@@ -410,11 +477,7 @@ class _EditorViewState extends State<EditorView> {
                                   : null,
                             ),
                             Flexible(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerRight,
-                                child: _cell(i, metrics),
-                              ),
+                              child: _BoundedAnswer(child: _cell(i, metrics)),
                             ),
                           ],
                         ),
@@ -460,8 +523,7 @@ class _EditorViewState extends State<EditorView> {
     );
   }
 
-  int _originalFor(int visibleIndex) =>
-      visibleIndex < widget.lineMap.length
+  int _originalFor(int visibleIndex) => visibleIndex < widget.lineMap.length
       ? widget.lineMap[visibleIndex]
       : visibleIndex;
 
@@ -509,9 +571,13 @@ class _EditorViewState extends State<EditorView> {
         style: style.copyWith(fontStyle: FontStyle.italic),
       );
     }
+    final detail = r.value == null
+        ? r.display!
+        : 'Displayed: ${r.display!}\nFull: ${presentFullValue(r.value!, format: widget.numberFormat)}';
     final cell = _answerGestures(
       index: i,
       line: r.text,
+      result: r,
       display: r.display!,
       canExplain:
           widget.showSteps && widget.explain != null && _hasOperators(r.text),
@@ -521,6 +587,7 @@ class _EditorViewState extends State<EditorView> {
         metrics: metrics,
         decimal: widget.numberFormat.decimal,
         group: widget.numberFormat.group,
+        detailTooltip: detail,
       ),
     );
 
@@ -585,13 +652,11 @@ class _EditorViewState extends State<EditorView> {
         : (widget.positiveColour ?? Palette.positive(widget.dark));
   }
 
-  /// Tap expands the steps; a long press (or a desktop right-click) copies
-  /// the number, which is the thing people actually want off a phone.
-  /// A double tap drops a reference into the caret — the mouse's drag, for
-  /// a finger that cannot drag and type at once.
-  /// The whole cell is the target — the chevron is a hint, not a 16px button.
+  /// Tap expands the steps; long-press / right-click opens a short menu
+  /// (displayed / full / details). A double tap drops a reference at the caret.
   Widget _answerGestures({
     required int index,
+    required LineResult result,
     required String line,
     required String display,
     required bool canExplain,
@@ -605,8 +670,13 @@ class _EditorViewState extends State<EditorView> {
               _openSteps(line);
             }
           : null,
-      onLongPress: () => _copy(display),
-      onSecondaryTap: () => _copy(display),
+      onLongPress: () => _copy(display, LocaleScope.t(context, 'copied')),
+      onSecondaryTapUp: (d) => _openAnswerMenu(
+        position: d.globalPosition,
+        result: result,
+        display: display,
+        index: index,
+      ),
       onDoubleTap: widget.onInsertReferenceAtCaret == null
           ? null
           : () {
@@ -617,14 +687,83 @@ class _EditorViewState extends State<EditorView> {
     );
   }
 
-  void _copy(String display) {
-    Clipboard.setData(ClipboardData(text: display));
+  Future<void> _openAnswerMenu({
+    required Offset position,
+    required LineResult result,
+    required String display,
+    required int index,
+  }) async {
+    tapFeedback(light: true);
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx + 1,
+        position.dy + 1,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'displayed',
+          child: Text(LocaleScope.t(context, 'copyDisplayed')),
+        ),
+        PopupMenuItem(
+          value: 'full',
+          child: Text(LocaleScope.t(context, 'copyFullNumber')),
+        ),
+        PopupMenuItem(
+          value: 'details',
+          child: Text(LocaleScope.t(context, 'copyDetails')),
+        ),
+        if (widget.onInsertReferenceAtCaret != null)
+          PopupMenuItem(
+            value: 'reference',
+            child: Text(LocaleScope.t(context, 'insertReference')),
+          ),
+      ],
+    );
+    if (!mounted || selected == null) return;
+    switch (selected) {
+      case 'displayed':
+        _copy(display, LocaleScope.t(context, 'copied'));
+      case 'full':
+        _copyFull(result);
+      case 'details':
+        _copyDetails(result);
+      case 'reference':
+        widget.onInsertReferenceAtCaret!(index + 1, _tokenFor(index));
+    }
+  }
+
+  void _copy(String text, String toast) {
+    Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
-        content: Text(LocaleScope.t(context, 'copied')),
+        content: Text(toast),
         duration: const Duration(milliseconds: 1100),
       ),
     );
+  }
+
+  void _copyFull(LineResult r) {
+    final v = r.value;
+    if (v == null) {
+      _copy(r.display!, LocaleScope.t(context, 'copied'));
+      return;
+    }
+    final full = presentFullValue(v, format: widget.numberFormat);
+    _copy(full, LocaleScope.t(context, 'copiedFull'));
+  }
+
+  void _copyDetails(LineResult r) {
+    final v = r.value;
+    if (v == null) {
+      _copy(r.display!, LocaleScope.t(context, 'copied'));
+      return;
+    }
+    final details =
+        'Displayed: ${r.display!}\nFull: ${presentFullValue(v, format: widget.numberFormat)}';
+    _copy(details, LocaleScope.t(context, 'copiedDetails'));
   }
 
   Future<void> _openSteps(String line) async {
@@ -683,32 +822,6 @@ class _EditorViewState extends State<EditorView> {
     height: 1.7,
     color: Palette.fg(widget.dark),
   );
-
-  /// Vertical offset of each logical line, honouring soft wraps.
-  List<double> _lineTops(String text, TextStyle style, double width) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      strutStyle: StrutStyle(
-        fontFamily: monoFamily,
-        fontSize: 15 * widget.scale,
-        height: 28 / 15,
-        forceStrutHeight: true,
-      ),
-    )..layout(maxWidth: width);
-
-    final tops = <double>[];
-    var offset = 0;
-    for (final line in text.split('\n')) {
-      final caret = painter.getOffsetForCaret(
-        TextPosition(offset: offset),
-        Rect.zero,
-      );
-      tops.add(caret.dy);
-      offset += line.length + 1;
-    }
-    return tops;
-  }
 }
 
 class _StepButton extends StatelessWidget {
@@ -734,6 +847,23 @@ class _StepButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Keeps answers inside the column at a stable readable size.
+///
+/// A global [FittedBox] used to crush mixed extremes to illegible glyphs.
+/// Clip with an opaque ellipsis (see [AnswerReadout]) and tooltip instead.
+class _BoundedAnswer extends StatelessWidget {
+  final Widget child;
+
+  const _BoundedAnswer({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: Align(alignment: Alignment.centerRight, child: child),
     );
   }
 }

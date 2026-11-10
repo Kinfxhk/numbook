@@ -94,7 +94,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 60));
     expect(find.text('New sheet'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.tune).first);
+    await tester.tap(find.byIcon(Icons.settings_outlined).first);
     await tester.pumpAndSettle();
     for (final label in T.switchLabel.values) {
       expect(find.text(label), findsOneWidget, reason: label);

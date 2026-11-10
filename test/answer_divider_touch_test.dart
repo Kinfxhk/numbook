@@ -20,12 +20,7 @@ Finder editor() => find.descendant(
 Finder divider() => find.byKey(const ValueKey('answer-divider'));
 
 /// The 1px rule, not the 44dp band around it.
-Finder hairline() => find.descendant(
-  of: divider(),
-  matching: find.byWidgetPredicate(
-    (w) => w is Container && w.constraints?.maxWidth == 1,
-  ),
-);
+Finder hairline() => find.byKey(const ValueKey('answer-rule'));
 
 double ruleX(WidgetTester tester) => tester.getCenter(hairline()).dx;
 

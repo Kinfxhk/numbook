@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/presentation.dart';
 import 'document_io.dart';
 
 /// Platform-facing file verbs. Everything that needs a dialog or a plugin lives
@@ -53,8 +54,9 @@ class FileActions {
     List<Sheet> sheets,
     SheetEngine engine, {
     bool print = true,
+    DisplayPrecision precision = DisplayPrecision.auto,
   }) async {
-    final doc = await _buildPdf(sheets, engine);
+    final doc = await _buildPdf(sheets, engine, precision: precision);
     if (print) {
       await Printing.layoutPdf(onLayout: (_) async => doc, name: 'Numbook');
     } else {
@@ -64,15 +66,16 @@ class FileActions {
 
   static Future<Uint8List> _buildPdf(
     List<Sheet> sheets,
-    SheetEngine engine,
-  ) async {
+    SheetEngine engine, {
+    DisplayPrecision precision = DisplayPrecision.auto,
+  }) async {
     final pdf = pw.Document();
     final mono = pw.Font.courier();
     final bold = pw.Font.courierBold();
 
     for (final sheet in sheets) {
       final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
+      final results = DocumentIo.exportResults(sheet, engine, precision: precision);
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,

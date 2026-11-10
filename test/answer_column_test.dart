@@ -106,6 +106,7 @@ void main() {
             controller: c,
             dark: false,
             scale: 2,
+            answerWidth: 400, // Enough room at 2x; narrow panes use a safe fallback.
             showSteps: false,
             results: const [
               LineResult(text: '1', display: '1,000'),
