@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Paper-and-ink palette. No gradients, no cards, no elevation.
 class Palette {
