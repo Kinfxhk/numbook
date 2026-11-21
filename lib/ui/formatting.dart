@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../engine/lexer.dart';
+
 /// Lightweight inline formatting.
 ///
 /// Markers live in the plain text, so a sheet stays a text file and the
@@ -24,24 +26,7 @@ class Fmt {
   };
 
   /// Removes every marker so the engine sees plain arithmetic.
-  static String stripMarkers(String s) {
-    var out = s;
-    for (final m in ['**', '__', '~~']) {
-      out = out.replaceAll(m, '');
-    }
-    out = out.replaceAll('{/}', '');
-    out = out.replaceAllMapped(
-      RegExp(r'\{(' + colours.keys.join('|') + r')\}'),
-      (_) => '',
-    );
-    // single underscores only when they wrap something, so identifiers like
-    // my_var survive
-    out = out.replaceAllMapped(
-      RegExp(r'(^|\s)_([^_]+)_(?=\s|$)'),
-      (m) => '${m[1]}${m[2]}',
-    );
-    return out;
-  }
+  static String stripMarkers(String s) => stripInlineMarkers(s);
 
   /// Turns one line into styled spans. Unmatched markers are shown as text.
   static List<TextSpan> spans(

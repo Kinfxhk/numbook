@@ -23,6 +23,22 @@ class Token {
 /// (`3。14`). The minus signs people paste (`−`, `–`, `—`, `－`) fold too,
 /// which is what the lexer already did one token at a time. `×` and `÷`
 /// stay as themselves; the parser accepts both.
+/// Strips inline presentation markers (`**bold**`, `_italic_`, `~~strike~~`,
+/// `__underline__`, `{red}…{/}`) without touching snake_case identifiers.
+/// Kept in pure Dart so exports, PDF print, CLI, and MCP evaluate identically.
+String stripInlineMarkers(String s) {
+  var out = s;
+  for (final m in const ['**', '__', '~~', '{/}']) {
+    out = out.replaceAll(m, '');
+  }
+  out = out.replaceAll(RegExp(r'\{(?:red|orange|green|blue|grey)\}'), '');
+  out = out.replaceAllMapped(
+    RegExp(r'(^|\s)_([^_]+)_(?=\s|$)'),
+    (m) => '${m[1]}${m[2]}',
+  );
+  return out;
+}
+
 String normalizeMathSource(String src) {
   if (src.isEmpty) return src;
   final codes = src.runes.toList(growable: false);

@@ -480,6 +480,18 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     );
   }
 
+  void _copyActiveSheetMarkdown() {
+    final s = _focused.sheet;
+    if (s == null) return;
+    final live = Sheet(
+      id: s.id,
+      title: s.title,
+      content: _focused.contentToSave,
+      folderId: s.folderId,
+    );
+    _copyToast(DocumentIo.singleSheetMarkdown(live, _makeEngine()));
+  }
+
   Future<void> _openSettings({int initialTab = 0}) => showSettingsSheet(
     context: _navKey.currentContext!,
     dark: _dark,
@@ -622,6 +634,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           keywords: const ['copy', 'answers', 'results'],
           onRun: () => _copyToast(allAnswers.join('\n')),
         ),
+      CommandAction(
+        id: 'copy-sheet-md',
+        icon: Icons.description_outlined,
+        label: t('copySheetMd'),
+        shortcut: '⌘⇧C',
+        keywords: const ['copy', 'markdown', 'md', 'share', 'note'],
+        onRun: _copyActiveSheetMarkdown,
+      ),
       CommandAction(
         id: 'toggle-split',
         icon: Icons.vertical_split,
@@ -1152,6 +1172,16 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
                 _openCommandPalette,
             const SingleActivator(LogicalKeyboardKey.keyK, control: true):
                 _openCommandPalette,
+            const SingleActivator(
+              LogicalKeyboardKey.keyC,
+              meta: true,
+              shift: true,
+            ): _copyActiveSheetMarkdown,
+            const SingleActivator(
+              LogicalKeyboardKey.keyC,
+              control: true,
+              shift: true,
+            ): _copyActiveSheetMarkdown,
             const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
                 _zoom(1.25),
             const SingleActivator(LogicalKeyboardKey.equal, control: true):

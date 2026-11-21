@@ -90,10 +90,10 @@ class T {
     'stepChevrons': 'Step chevrons',
     'stepChevronsHint': 'Show steps beside complex answers',
     'shortcuts':
-        'Shortcuts — ⌘/Ctrl: S save · ⇧S strike · ⇧D save a copy · '
-        'B bold · I italic · U underline · F search · W close tab · '
-        'N new sheet · \\ sidebar · ⇧A answers · + − 0 zoom · '
-        'double-click the divider to fit',
+        'Shortcuts — ⌘/Ctrl: K commands · S save · ⇧C copy Markdown · '
+        '⇧S strike · ⇧D duplicate · B bold · I italic · U underline · '
+        'F search · W close tab · N new sheet · \\ sidebar · ⇧A answers · '
+        '+ − 0 zoom · ⌥-drag any number to scrub',
     'autoRates': 'Auto-refresh rates',
     'autoRatesHint': 'Once a day when a network is available',
     'exchangeRates': 'Exchange rates',
@@ -147,6 +147,9 @@ class T {
     'cheatTapHint': 'Tap any row to copy or insert',
     'inserted': 'Inserted',
     'ratesStale': 'stale',
+    'copySheetMd': 'Copy sheet as Markdown',
+    'answerHintSteps': 'Click for steps · Double-click to reference · Right-click to copy',
+    'answerHintCopy': 'Double-click to reference · Right-click to copy',
   };
 
   static const _zhHant = <String, String>{
@@ -216,9 +219,9 @@ class T {
     'stepChevrons': '步驟箭頭',
     'stepChevronsHint': '複雜算式旁顯示步驟',
     'shortcuts':
-        '快捷鍵 — ⌘/Ctrl：S 儲存 · ⇧S 刪除線 · ⇧D 另存副本 · '
-        'B 粗體 · I 斜體 · U 底線 · F 搜尋 · W 關分頁 · N 新記事 · '
-        '\\ 側欄 · ⇧A 答案 · + − 0 縮放 · 雙擊分隔線自動對齊',
+        '快捷鍵 — ⌘/Ctrl：K 指令板 · S 儲存 · ⇧C 複製 Markdown · '
+        '⇧S 刪除線 · ⇧D 複製記事 · B 粗體 · I 斜體 · U 底線 · F 搜尋 · W 關分頁 · '
+        'N 新記事 · \\ 側欄 · ⇧A 答案 · + − 0 縮放 · 按住 ⌥ 左右拖曳數字即時調數',
     'autoRates': '自動更新匯率',
     'autoRatesHint': '有網絡時每日一次',
     'exchangeRates': '匯率',
@@ -270,6 +273,9 @@ class T {
     'cheatTapHint': '點按例子即可複製或插入至記事',
     'inserted': '已插入',
     'ratesStale': '待更新',
+    'copySheetMd': '複製記事為 Markdown',
+    'answerHintSteps': '點按睇步驟 · 雙擊插入引用 · 右鍵複製',
+    'answerHintCopy': '雙擊插入引用 · 右鍵複製',
   };
 
   static const _zhHans = <String, String>{
@@ -339,9 +345,9 @@ class T {
     'stepChevrons': '步骤箭头',
     'stepChevronsHint': '复杂算式旁显示步骤',
     'shortcuts':
-        '快捷键 — ⌘/Ctrl：S 保存 · ⇧S 删除线 · ⇧D 另存副本 · '
-        'B 粗体 · I 斜体 · U 下划线 · F 搜索 · W 关闭标签 · N 新笔记 · '
-        '\\ 侧栏 · ⇧A 答案 · + − 0 缩放 · 双击分隔线自动对齐',
+        '快捷键 — ⌘/Ctrl：K 命令面板 · S 保存 · ⇧C 复制 Markdown · '
+        '⇧S 删除线 · ⇧D 复制笔记 · B 粗体 · I 斜体 · U 下划线 · F 搜索 · W 关闭标签 · '
+        'N 新笔记 · \\ 侧栏 · ⇧A 答案 · + − 0 缩放 · 按住 ⌥ 左右拖动数字实时调参',
     'autoRates': '自动更新汇率',
     'autoRatesHint': '有网络时每天一次',
     'exchangeRates': '汇率',
@@ -393,6 +399,9 @@ class T {
     'cheatTapHint': '点击示例即可复制或插入到笔记',
     'inserted': '已插入',
     'ratesStale': '待更新',
+    'copySheetMd': '复制笔记为 Markdown',
+    'answerHintSteps': '点击查看步骤 · 双击插入引用 · 右键复制',
+    'answerHintCopy': '双击插入引用 · 右键复制',
   };
 
   // UI copy only. Hints keep engine examples (`rent = 2500`, `total of`)
@@ -464,10 +473,9 @@ class T {
     'stepChevrons': '手順の矢印',
     'stepChevronsHint': '複雑な答えの横に手順を表示',
     'shortcuts':
-        'ショートカット — ⌘/Ctrl: S 保存 · ⇧S 取り消し線 · ⇧D コピーを保存 · '
-        'B 太字 · I 斜体 · U 下線 · F 検索 · W タブを閉じる · '
-        'N 新しいシート · \\ サイドバー · ⇧A 答え · + − 0 ズーム · '
-        '区切りをダブルクリックで幅を合わせる',
+        'ショートカット — ⌘/Ctrl: K コマンド · S 保存 · ⇧C Markdown コピー · '
+        '⇧S 取り消し線 · ⇧D 複製 · B 太字 · I 斜体 · U 下線 · F 検索 · W タブを閉じる · '
+        'N 新しいシート · \\ サイドバー · ⇧A 答え · + − 0 ズーム · ⌥ドラッグで数値を調整',
     'autoRates': 'レートを自動更新',
     'autoRatesHint': 'ネットワークがあるとき、1日に1回',
     'exchangeRates': '為替レート',
@@ -519,6 +527,9 @@ class T {
     'cheatTapHint': '例をタップしてコピーまたは挿入',
     'inserted': '挿入しました',
     'ratesStale': '期限切れ',
+    'copySheetMd': 'シートを Markdown でコピー',
+    'answerHintSteps': 'クリックで手順 · ダブルクリックで参照挿入 · 右クリックでコピー',
+    'answerHintCopy': 'ダブルクリックで参照挿入 · 右クリックでコピー',
   };
 
   static const _ko = <String, String>{
@@ -588,10 +599,9 @@ class T {
     'stepChevrons': '단계 화살표',
     'stepChevronsHint': '복잡한 답 옆에 단계를 표시',
     'shortcuts':
-        '단축키 — ⌘/Ctrl: S 저장 · ⇧S 취소선 · ⇧D 사본 저장 · '
-        'B 굵게 · I 기울임 · U 밑줄 · F 검색 · W 탭 닫기 · '
-        'N 새 시트 · \\ 사이드바 · ⇧A 답 · + − 0 확대 · '
-        '구분선을 두 번 눌러 너비 맞추기',
+        '단축키 — ⌘/Ctrl: K 명령 · S 저장 · ⇧C Markdown 복사 · '
+        '⇧S 취소선 · ⇧D 복제 · B 굵게 · I 기울임 · U 밑줄 · F 검색 · W 탭 닫기 · '
+        'N 새 시트 · \\ 사이드바 · ⇧A 답 · + − 0 확대 · ⌥드래그로 숫자 실시간 조절',
     'autoRates': '환율 자동 새로고침',
     'autoRatesHint': '네트워크가 있을 때 하루에 한 번',
     'exchangeRates': '환율',
@@ -643,6 +653,9 @@ class T {
     'cheatTapHint': '예시를 탭하여 복사 또는 삽입',
     'inserted': '삽입됨',
     'ratesStale': '오래됨',
+    'copySheetMd': '시트를 Markdown으로 복사',
+    'answerHintSteps': '클릭하여 단계 보기 · 더블클릭하여 참조 삽입 · 우클릭하여 복사',
+    'answerHintCopy': '더블클릭하여 참조 삽입 · 우클릭하여 복사',
   };
 
   static const _all = <String, Map<String, String>>{

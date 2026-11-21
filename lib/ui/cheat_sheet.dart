@@ -48,6 +48,7 @@ const cheatSheet = <CheatGroup>[
     CheatRow('25% off 159.99', '119.9925'),
     CheatRow('20 is what % of 80', '25%'),
     CheatRow('5% of what is 150', '3,000'),
+    CheatRow('from 80 to 100 in %', '25%'),
     CheatRow('20是80的百分之幾', '25%'),
     CheatRow('0.5 as percentage', '50%'),
     CheatRow('打八折 100', '80'),
@@ -86,6 +87,7 @@ const cheatSheet = <CheatGroup>[
     CheatRow('2026-01-01 15:00 HKT in New York', '1 January 2026 at 2:00 AM'),
   ]),
   CheatGroup('cheatOther', [
+    CheatRow('? * 30% = 1290', '4,300'),
     CheatRow('rent = 2500', '2,500'),
     CheatRow('line 1 + line 2'),
     CheatRow('prev'),

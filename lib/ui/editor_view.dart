@@ -157,8 +157,113 @@ class EditorView extends StatefulWidget {
     this.explicit = false,
   });
 
+  /// Pure helper for scrubbing the number literal at [offset] by [stepDelta]
+  /// units of its least-significant decimal place.
+  static (String text, int selStart, int selEnd)? scrubNumberAt(
+    String text,
+    int offset,
+    int stepDelta, {
+    NumberFormat format = NumberFormat.us,
+  }) {
+    final tok = _findScrubToken(text, offset, format);
+    if (tok == null) return null;
+    final formatted = tok.formatStep(stepDelta, format);
+    final out = '${tok.docPrefix}$formatted${tok.docSuffix}';
+    return (out, tok.docPrefix.length, tok.docPrefix.length + formatted.length);
+  }
+
   @override
   State<EditorView> createState() => _EditorViewState();
+}
+
+class _ScrubToken {
+  final String docPrefix;
+  final String docSuffix;
+  final double initialValue;
+  final int decimals;
+  final bool grouped;
+
+  const _ScrubToken({
+    required this.docPrefix,
+    required this.docSuffix,
+    required this.initialValue,
+    required this.decimals,
+    required this.grouped,
+  });
+
+  String formatStep(int stepDelta, NumberFormat format) {
+    final unit = math.pow(10.0, -decimals).toDouble();
+    final rawNext = initialValue + stepDelta * unit;
+    final next = decimals == 0
+        ? rawNext.roundToDouble()
+        : double.parse(rawNext.toStringAsFixed(decimals));
+    final cleanZero = next == 0 ? 0.0 : next;
+    if (grouped) {
+      return formatNumber(cleanZero, decimals: decimals, format: format);
+    }
+    return cleanZero
+        .toStringAsFixed(decimals)
+        .replaceAll('.', format.decimal);
+  }
+}
+
+class _ScrubSession {
+  final _ScrubToken token;
+  final double startGlobalX;
+  int lastSteps = 0;
+
+  _ScrubSession({required this.token, required this.startGlobalX});
+}
+
+_ScrubToken? _findScrubToken(String text, int offset, NumberFormat format) {
+  if (text.isEmpty) return null;
+  final clamped = offset.clamp(0, text.length);
+  final lineStart = clamped == 0 ? 0 : text.lastIndexOf('\n', clamped - 1) + 1;
+  final nl = text.indexOf('\n', clamped);
+  final lineEnd = nl < 0 ? text.length : nl;
+  final line = text.substring(lineStart, lineEnd);
+  if (line.trimLeft().startsWith('//') || line.trimLeft().startsWith('# ')) {
+    return null;
+  }
+  final local = clamped - lineStart;
+  final dec = RegExp.escape(format.decimal);
+  final grp = RegExp.escape(format.group);
+  final numRe = RegExp('(?<!\\w)-?\\d(?:[\\d$grp]*\\d)?(?:$dec\\d+)?');
+
+  for (final m in numRe.allMatches(line)) {
+    var s = m.start;
+    final e = m.end;
+    var raw = m.group(0)!;
+    // Treat `-` as part of the number only when unary (not `100 - 20`)
+    if (raw.startsWith('-') && s > 0) {
+      final before = line.substring(0, s).trimRight();
+      if (before.isNotEmpty) {
+        final prevChar = before[before.length - 1];
+        if (!r'(=:+*/^×÷,$€£¥₩₹฿'.contains(prevChar)) {
+          s += 1;
+          raw = raw.substring(1);
+        }
+      }
+    }
+    if (local >= s && local <= e) {
+      final normalized = raw
+          .replaceAll(format.group, '')
+          .replaceAll(format.decimal, '.');
+      final val = double.tryParse(normalized);
+      if (val == null) return null;
+      final decIdx = raw.indexOf(format.decimal);
+      final decimals = decIdx < 0 ? 0 : raw.length - decIdx - 1;
+      final grouped = raw.contains(format.group);
+      return _ScrubToken(
+        docPrefix: text.substring(0, lineStart + s),
+        docSuffix: text.substring(lineStart + e),
+        initialValue: val,
+        decimals: decimals,
+        grouped: grouped,
+      );
+    }
+  }
+  return null;
 }
 
 class _EditorViewState extends State<EditorView> {
@@ -168,6 +273,7 @@ class _EditorViewState extends State<EditorView> {
 
   List<double> _tops = const [];
   double _lastHeight = 0;
+  _ScrubSession? _scrub;
 
   @override
   void initState() {
@@ -453,7 +559,23 @@ class _EditorViewState extends State<EditorView> {
                               left: gutterW,
                               right: answerW,
                             ),
-                            child: textField,
+                            child: MouseRegion(
+                              cursor: _scrub != null
+                                  ? SystemMouseCursors.resizeLeftRight
+                                  : MouseCursor.defer,
+                              child: Listener(
+                                behavior: HitTestBehavior.translucent,
+                                onPointerDown: (e) => _onScrubDown(
+                                  e,
+                                  style,
+                                  textWidth < 80 ? 80 : textWidth,
+                                ),
+                                onPointerMove: _onScrubMove,
+                                onPointerUp: (_) => _endScrub(),
+                                onPointerCancel: (_) => _endScrub(),
+                                child: textField,
+                              ),
+                            ),
                           ),
                           if (widget.answersVisible && answerW > 0)
                             for (var i = 0; i < widget.results.length; i++)
@@ -700,6 +822,53 @@ class _EditorViewState extends State<EditorView> {
         : (widget.positiveColour ?? Palette.positive(widget.dark));
   }
 
+  void _onScrubDown(PointerDownEvent e, TextStyle style, double maxWidth) {
+    if (widget.readOnly || !HardwareKeyboard.instance.isAltPressed) return;
+    final text = widget.controller.text;
+    if (text.isEmpty) return;
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      strutStyle: StrutStyle(
+        fontFamily: monoFamily,
+        fontSize: 15 * widget.scale,
+        height: 28 / 15,
+        forceStrutHeight: true,
+      ),
+    )..layout(maxWidth: maxWidth);
+    final pos = painter.getPositionForOffset(e.localPosition);
+    painter.dispose();
+    final tok = _findScrubToken(text, pos.offset, widget.numberFormat);
+    if (tok == null) return;
+    setState(() {
+      _scrub = _ScrubSession(token: tok, startGlobalX: e.position.dx);
+    });
+  }
+
+  void _onScrubMove(PointerMoveEvent e) {
+    final s = _scrub;
+    if (s == null) return;
+    final rawSteps = ((e.position.dx - s.startGlobalX) / 6.0).round();
+    final mult = HardwareKeyboard.instance.isShiftPressed ? 10 : 1;
+    final steps = rawSteps * mult;
+    if (steps == s.lastSteps) return;
+    s.lastSteps = steps;
+    final formatted = s.token.formatStep(steps, widget.numberFormat);
+    final next = '${s.token.docPrefix}$formatted${s.token.docSuffix}';
+    widget.controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection(
+        baseOffset: s.token.docPrefix.length,
+        extentOffset: s.token.docPrefix.length + formatted.length,
+      ),
+    );
+    tapFeedback(light: true);
+  }
+
+  void _endScrub() {
+    if (_scrub != null) setState(() => _scrub = null);
+  }
+
   Widget _answerGestures({
     required int index,
     required String line,
@@ -707,23 +876,33 @@ class _EditorViewState extends State<EditorView> {
     required bool canExplain,
     required Widget child,
   }) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: canExplain
-          ? () {
-              tapFeedback();
-              _openSteps(line);
-            }
-          : null,
-      onLongPress: () => _copy(display),
-      onSecondaryTap: () => _copy(display),
-      onDoubleTap: widget.onInsertReferenceAtCaret == null
-          ? null
-          : () {
-              tapFeedback(light: true);
-              widget.onInsertReferenceAtCaret!(index + 1, _tokenFor(index));
-            },
-      child: child,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: Tooltip(
+        message: LocaleScope.t(
+          context,
+          canExplain ? 'answerHintSteps' : 'answerHintCopy',
+        ),
+        waitDuration: const Duration(milliseconds: 600),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: canExplain
+              ? () {
+                  tapFeedback();
+                  _openSteps(line);
+                }
+              : null,
+          onLongPress: () => _copy(display),
+          onSecondaryTap: () => _copy(display),
+          onDoubleTap: widget.onInsertReferenceAtCaret == null
+              ? null
+              : () {
+                  tapFeedback(light: true);
+                  widget.onInsertReferenceAtCaret!(index + 1, _tokenFor(index));
+                },
+          child: child,
+        ),
+      ),
     );
   }
 

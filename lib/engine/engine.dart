@@ -187,6 +187,28 @@ class SheetEngine {
   }
 
   List<String> _explainPhrase(String body, EvalContext ctx) {
+    final solved = _solveUnknown(
+      body,
+      ctx,
+      values: const [],
+      sectionStart: 0,
+      current: 0,
+    );
+    if (solved != null && solved is! ErrorValue) {
+      final isPctSlot = RegExp(r'\?\s*%').hasMatch(body);
+      final lhsLabel = isPctSlot ? '?%' : '?';
+      return [body, '$lhsLabel = ${_compact(solved)}'];
+    }
+    final pctChg = _percentChange(
+      body,
+      ctx,
+      values: const [],
+      sectionStart: 0,
+      current: 0,
+    );
+    if (pctChg != null && pctChg is! ErrorValue) {
+      return [body, '= ${_compact(pctChg)}'];
+    }
     final discount = _zhDiscount(
       body,
       ctx,
@@ -475,6 +497,17 @@ class SheetEngine {
       if (v != null && v is! ErrorValue) return v;
     }
 
+    // single-unknown linear equation: "? * 30% = 1290", "$2500 + ? = $3200"
+    if (body.contains('?') && body.contains('=') && !body.contains('==')) {
+      return _solveUnknown(
+        body,
+        ctx,
+        values: values,
+        sectionStart: sectionStart,
+        current: current,
+      );
+    }
+
     // assignment: "rent = 2500", "total cost = $750"
     final assign = RegExp(r'^([^=<>!]+?)\s*=\s*([^=].*)$').firstMatch(body);
     if (assign != null && !body.contains('==')) {
@@ -692,6 +725,15 @@ class SheetEngine {
       current: current,
     );
     if (surcharge != null) return surcharge;
+
+    final pctChg = _percentChange(
+      body,
+      ctx,
+      values: values,
+      sectionStart: sectionStart,
+      current: current,
+    );
+    if (pctChg != null) return pctChg;
 
     final zhPct = _zhPercent(
       body,
@@ -1230,6 +1272,251 @@ class SheetEngine {
       if (cheng.group(4) != null) tenths += 0.5;
       final sign = cheng.group(2) == '加' ? 1.0 : -1.0;
       return scaleAmount(cheng.group(1)!, 1.0 + sign * (tenths * 0.1));
+    }
+    return null;
+  }
+
+  /// Single-unknown linear solver (`? * 30% = 1290`, `$2500 + ? = $3200`,
+  /// `480 * ?% = 384`, `5 kg + ? = 8 kg`).
+  ///
+  /// Uses 3-point collinearity verification (`x = 0, 1, 2`) plus residual
+  /// back-substitution. Non-linear equations (`? * ? = 9`, `100 / ? = 5`) and
+  /// multi-`?` lines stay unanswered (`null`) per "No answer beats a wrong answer".
+  Value? _solveUnknown(
+    String body,
+    EvalContext ctx, {
+    required List<Value?> values,
+    required int sectionStart,
+    required int current,
+  }) {
+    if ('?'.allMatches(body).length != 1) return null;
+    final eq = RegExp(r'^([^=<>!]+)=([^=<>!]+)$').firstMatch(body);
+    if (eq == null) return null;
+    final lhsRaw = eq.group(1)!.trim();
+    final rhsRaw = eq.group(2)!.trim();
+    if (lhsRaw.isEmpty || rhsRaw.isEmpty) return null;
+
+    final isPctSlot = RegExp(r'\?\s*%').hasMatch(body);
+
+    String numLiteral(double x) {
+      if (x == x.roundToDouble() && x.abs() < 1e15) {
+        return x.toStringAsFixed(0);
+      }
+      var s = x.toStringAsFixed(10);
+      s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+      return s.replaceAll('.', format.decimal);
+    }
+
+    Value? evalSide(String side, String replacement) {
+      final expr = side.replaceFirst('?', replacement);
+      try {
+        return _parseValue(
+          expr,
+          ctx,
+          values: values,
+          sectionStart: sectionStart,
+          current: current,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    double? diffOf(Value? l, Value? r, {String? ccy, Unit? unit}) {
+      if (l == null || r == null || l is ErrorValue || r is ErrorValue) {
+        return null;
+      }
+      if (ccy != null) {
+        if (l is! MoneyValue || r is! MoneyValue) return null;
+        final fl = rates[l.currency];
+        final fr = rates[r.currency];
+        final fc = rates[ccy];
+        if (fl == null || fr == null || fc == null) return null;
+        final lv = l.value / fl * fc;
+        final rv = r.value / fr * fc;
+        return lv - rv;
+      }
+      if (unit != null) {
+        if (l is! NumValue || r is! NumValue) return null;
+        if (l.unit == null || r.unit == null) return null;
+        final lv = units.convert(l.value, l.unit!, unit);
+        final rv = units.convert(r.value, r.unit!, unit);
+        if (lv == null || rv == null) return null;
+        return lv - rv;
+      }
+      if (l is NumValue && r is NumValue && l.unit == null && r.unit == null) {
+        return l.value - r.value;
+      }
+      if (l is PercentValue && r is PercentValue) {
+        return l.ratio - r.ratio;
+      }
+      return null;
+    }
+
+    Value? trySolveSlot({String? ccy, Unit? unit}) {
+      String wrap(double x) {
+        final lit = numLiteral(x);
+        if (ccy != null) return '($lit $ccy)';
+        if (unit != null) return '($lit ${unit.id})';
+        return '($lit)';
+      }
+
+      final f0 = diffOf(
+        evalSide(lhsRaw, wrap(0)),
+        evalSide(rhsRaw, wrap(0)),
+        ccy: ccy,
+        unit: unit,
+      );
+      final f1 = diffOf(
+        evalSide(lhsRaw, wrap(1)),
+        evalSide(rhsRaw, wrap(1)),
+        ccy: ccy,
+        unit: unit,
+      );
+      final f2 = diffOf(
+        evalSide(lhsRaw, wrap(2)),
+        evalSide(rhsRaw, wrap(2)),
+        ccy: ccy,
+        unit: unit,
+      );
+      if (f0 == null || f1 == null || f2 == null) return null;
+      if (!f0.isFinite || !f1.isFinite || !f2.isFinite) return null;
+
+      final m1 = f1 - f0;
+      final m2 = f2 - f1;
+      final scale = [1.0, f0.abs(), f1.abs(), f2.abs()].reduce(math.max);
+      // Strict collinearity guard: rejects quadratic, reciprocal, and trig forms
+      if ((m2 - m1).abs() > 1e-9 * scale) return null;
+      if (m1.abs() <= 1e-12) return null;
+
+      final root = -f0 / m1;
+      if (!root.isFinite) return null;
+
+      // Back-substitution verification
+      final checkL = evalSide(lhsRaw, wrap(root));
+      final checkR = evalSide(rhsRaw, wrap(root));
+      final residual = diffOf(checkL, checkR, ccy: ccy, unit: unit);
+      if (residual == null || residual.abs() > 1e-6 * math.max(1.0, scale)) {
+        return null;
+      }
+
+      final snapped = (root - root.roundToDouble()).abs() < 1e-9
+          ? root.roundToDouble()
+          : double.parse(root.toStringAsPrecision(12));
+      if (isPctSlot) return PercentValue(snapped / 100);
+      if (ccy != null) return MoneyValue(snapped, ccy);
+      if (unit != null) return NumValue(snapped, unit);
+      return NumValue(snapped);
+    }
+
+    // 1. Try dimensionless / percent slot first (`? * 30% = 1290`, `480 * ?% = 384`)
+    final plain = trySolveSlot();
+    if (plain != null) return plain;
+    if (isPctSlot) return null;
+
+    // 2. Inspect tokens for currency or physical unit context
+    final toks = Lexer(body, format: format).tokenize();
+    final seenCcy = <String>{};
+    final seenUnits = <Unit>[];
+    for (final t in toks) {
+      if (t.type == TokType.currency) {
+        final ccy = t.text == '¥'
+            ? format.yen
+            : (currencyAliases[t.text] ?? t.text.replaceAll(r'$', ''));
+        if (currencyCodes.contains(ccy)) seenCcy.add(ccy);
+      } else if (t.type == TokType.word) {
+        final upper = t.text.toUpperCase();
+        if (currencyCodes.contains(upper)) {
+          seenCcy.add(upper);
+        } else {
+          final u = units.lookup(t.text);
+          if (u != null && !u.dims.containsKey('currency')) {
+            seenUnits.add(u);
+          }
+        }
+      }
+    }
+    // Also include currencies/units from referenced variables on the line
+    for (final t in toks) {
+      if (t.type == TokType.word) {
+        final v = ctx.vars[t.text.toLowerCase()] ?? ctx.labels[t.text.toLowerCase()];
+        if (v is MoneyValue) seenCcy.add(v.currency);
+        if (v is NumValue && v.unit != null) seenUnits.add(v.unit!);
+      }
+    }
+
+    for (final ccy in seenCcy) {
+      final solved = trySolveSlot(ccy: ccy);
+      if (solved != null) return solved;
+    }
+    for (final u in seenUnits) {
+      final solved = trySolveSlot(unit: u);
+      if (solved != null) return solved;
+    }
+    return null;
+  }
+
+  /// Relative percentage change (`from 80 to 100 in %`, `change from $80 to $100`,
+  /// `80 到 100 升跌`).
+  Value? _percentChange(
+    String body,
+    EvalContext ctx, {
+    required List<Value?> values,
+    required int sectionStart,
+    required int current,
+  }) {
+    final m =
+        RegExp(
+          r'^from\s+(.+?)\s+to\s+(.+?)\s+(?:in|as)\s+(?:%|percent|percentage)$',
+          caseSensitive: false,
+        ).firstMatch(body) ??
+        RegExp(
+          r'^(?:percent(?:age)?\s+|%\s*)?change\s+from\s+(.+?)\s+to\s+(.+)$',
+          caseSensitive: false,
+        ).firstMatch(body) ??
+        RegExp(
+          r'^(.+?)\s*(?:到|至)\s*(.+?)\s*(?:升跌|變化|变化|漲跌|涨跌)(?:率)?$',
+        ).firstMatch(body);
+    if (m == null) return null;
+
+    Value? evalPart(String s) {
+      try {
+        return _parseValue(
+          s.trim(),
+          ctx,
+          values: values,
+          sectionStart: sectionStart,
+          current: current,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final a = evalPart(m.group(1)!);
+    final b = evalPart(m.group(2)!);
+    if (a == null || b == null) return null;
+
+    if (a is NumValue && b is NumValue) {
+      if (a.unit == null && b.unit == null) {
+        if (a.value == 0) return const ErrorValue('divide by zero');
+        return PercentValue((b.value - a.value) / a.value);
+      }
+      if (a.unit != null && b.unit != null) {
+        final bv = units.convert(b.value, b.unit!, a.unit!);
+        if (bv == null) return const ErrorValue('incompatible units');
+        if (a.value == 0) return const ErrorValue('divide by zero');
+        return PercentValue((bv - a.value) / a.value);
+      }
+      return null;
+    }
+    if (a is MoneyValue && b is MoneyValue) {
+      final fa = rates[a.currency];
+      final fb = rates[b.currency];
+      if (fa == null || fb == null) return const ErrorValue('no rate');
+      final bv = b.value / fb * fa;
+      if (a.value == 0) return const ErrorValue('divide by zero');
+      return PercentValue((bv - a.value) / a.value);
     }
     return null;
   }

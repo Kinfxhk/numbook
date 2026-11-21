@@ -206,13 +206,13 @@ class UnitRegistry {
 
   /// Rewrite a compound unit into the one a person would write.
   ///
-  /// `3 min * 15 mph` is 45 min·mph in base arithmetic and 0.75 mi on paper.
-  /// The family (mi vs km, mph vs m/s) follows the units that were typed.
+  /// `3 min * 15 mph` is 45 min·mph in base arithmetic and 0.75 mi on paper;
+  /// `1 min * 1 mph` is 88 ft; `10 s * 100 MB/s` is 1 GB.
   (double, Unit) ideal(double value, Unit unit, List<Unit> hints) {
     final d = unit.dims;
     if (d.length == 2 && d['time'] == 1 && d['speed'] == 1) {
       final meters = value * unit.factor;
-      final chosen = _pickLength(hints);
+      final chosen = _pickLength(meters, hints);
       return (_tidy(meters / chosen.factor), chosen);
     }
     if (d.length == 2 && d['length'] == 1 && d['time'] == -1) {
@@ -220,17 +220,33 @@ class UnitRegistry {
       final chosen = _pickSpeed(hints);
       return (_tidy(mps / chosen.factor), chosen);
     }
+    if (d.length == 1 && d['data'] == 1 && unit.id.contains('·')) {
+      final bytes = value * unit.factor;
+      final chosen = _pickData(bytes);
+      return (_tidy(bytes / chosen.factor), chosen);
+    }
+    if (d.length == 1 && d['time'] == 1 && unit.id.contains('/')) {
+      final seconds = value * unit.factor;
+      final chosen = _pickTime(seconds);
+      return (_tidy(seconds / chosen.factor), chosen);
+    }
     return (value, unit);
   }
 
   static const _imperial = {'mph', 'mi', 'ft', 'yd', 'in'};
   static const _nautical = {'knot', 'nmi'};
 
-  Unit _pickLength(List<Unit> hints) {
+  Unit _pickLength(double meters, List<Unit> hints) {
     final ids = hints.map((e) => e.id).toSet();
+    final absM = meters.abs();
     if (ids.any(_nautical.contains)) return _byName['nmi']!;
-    if (ids.any(_imperial.contains)) return _byName['mi']!;
-    if (ids.contains('km') || ids.contains('km/h')) return _byName['km']!;
+    if (ids.any(_imperial.contains)) {
+      if (absM > 0 && absM < 160.9344) return _byName['ft']!;
+      return _byName['mi']!;
+    }
+    if (ids.contains('km') || ids.contains('km/h') || absM >= 1000) {
+      return _byName['km']!;
+    }
     return _byName['m']!;
   }
 
@@ -240,6 +256,22 @@ class UnitRegistry {
     if (ids.contains('km') || ids.contains('km/h')) return _byName['km/h']!;
     if (ids.contains('knot')) return _byName['knot']!;
     return _byName['m/s']!;
+  }
+
+  Unit _pickData(double bytes) {
+    final b = bytes.abs();
+    if (b >= 1e12) return _byName['tb']!;
+    if (b >= 1e9) return _byName['gb']!;
+    if (b >= 1e6) return _byName['mb']!;
+    if (b >= 1e3) return _byName['kb']!;
+    return _byName['b']!;
+  }
+
+  Unit _pickTime(double seconds) {
+    final s = seconds.abs();
+    if (s >= 3600) return _byName['h']!;
+    if (s >= 60) return _byName['min']!;
+    return _byName['s']!;
   }
 
   /// 45.00000000000001 min·mph must read 45. Twelve significant digits is

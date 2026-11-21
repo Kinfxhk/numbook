@@ -2,17 +2,20 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:tallynote/engine/engine.dart';
+import 'package:tallynote/engine/lexer.dart';
+import 'package:tallynote/engine/mcp_server.dart';
 import 'package:tallynote/engine/values.dart';
 
-const _version = '0.3.9';
+const _version = '0.5.3';
 
 const _usage = '''
-Tallynote — the notepad that adds up, from the command line.
+Tallynote (Numbook CLI) — the notepad that adds up, from the command line.
 
 Usage:
   tallynote <expression>              evaluate one line
   tallynote -f <file>                 evaluate a note, one line at a time
   echo "2+2" | tallynote              read from stdin
+  tallynote mcp                       run offline JSON-RPC MCP server over stdio
 
 Options:
   -e, --eval <text>    expression to evaluate
@@ -20,28 +23,38 @@ Options:
   -j, --json           structured output, one JSON object per line
   -s, --steps          include the step breakdown
       --total          print the grand total of all lines
-      --dp <n>         decimal places for plain numbers
+      --dp <n>         decimal places for numbers
+      --format <p>     number preset: us (1,234.56) or eu (1.234,56)
+      --yen <code>     currency for ¥: JPY or CNY
       --strict         exit 1 if any line fails
   -h, --help           this text
       --version        version
 
 Examples:
   tallynote "5 kg + 3 lb"
-  tallynote "'\$20 in euro'"
+  tallynote "? * 30% = 1290" --steps
   tallynote -f budget.txt --json --total
+  tallynote mcp
 ''';
 
-void main(List<String> argv) {
+Future<void> main(List<String> argv) async {
   final args = List<String>.from(argv);
+  if (args.isNotEmpty && args.first == 'mcp') {
+    await const McpServer().serveStdio();
+    return;
+  }
+
   String? file;
   String? eval;
   var json = false;
   var steps = false;
   var total = false;
   var strict = false;
+  var preset = 'us';
+  var yen = 'JPY';
   int? dp;
 
-  List<String> positional = [];
+  final positional = <String>[];
 
   for (var i = 0; i < args.length; i++) {
     final a = args[i];
@@ -69,62 +82,78 @@ void main(List<String> argv) {
       case '--dp':
         if (i + 1 >= args.length) _die('missing value for --dp');
         dp = int.tryParse(args[++i]);
-        if (dp == null) _die('--dp needs a number');
+        if (dp == null || dp < 0 || dp > 15) _die('--dp needs 0..15');
+      case '--format':
+        if (i + 1 >= args.length) _die('missing value for --format');
+        final v = args[++i].toLowerCase();
+        if (v != 'us' && v != 'eu') _die('--format expects us or eu');
+        preset = v;
+      case '--yen':
+        if (i + 1 >= args.length) _die('missing value for --yen');
+        final v = args[++i].toUpperCase();
+        if (v != 'JPY' && v != 'CNY') _die('--yen expects JPY or CNY');
+        yen = v;
       default:
         if (a.startsWith('-') && a != '-') _die('unknown option $a');
         positional.add(a);
     }
   }
 
-  final engine = SheetEngine(strict: strict);
+  final fmt = NumberFormat.ofPreset(preset, yen: yen);
+  final engine = SheetEngine(strict: strict, format: fmt);
 
-  List<String> lines;
+  List<String> rawLines;
   if (file != null) {
     if (file == '-') {
       final text = _readAll();
-      lines = text.isEmpty ? <String>[] : text.trimRight().split('\n');
+      rawLines = text.isEmpty ? <String>[] : text.trimRight().split('\n');
     } else {
-      lines = File(file).readAsLinesSync();
+      rawLines = File(file).readAsLinesSync();
     }
   } else if (eval != null) {
-    lines = [eval];
+    rawLines = [eval];
   } else if (positional.isNotEmpty) {
-    lines = [positional.join(' ')];
+    rawLines = [positional.join(' ')];
   } else if (!stdin.hasTerminal) {
     final text = _readAll();
-    lines = text.isEmpty ? <String>[] : text.trimRight().split('\n');
+    rawLines = text.isEmpty ? <String>[] : text.trimRight().split('\n');
   } else {
     stdout.writeln(_usage);
     exit(64);
   }
 
-  if (total) lines.add('grand total');
+  if (total) rawLines.add('grand total');
 
-  final results = engine.evaluate(lines);
+  final cleanLines = rawLines.map(stripInlineMarkers).toList();
+  final results = engine.evaluate(cleanLines);
   var failed = 0;
   final out = StringBuffer();
 
   for (var i = 0; i < results.length; i++) {
     final r = results[i];
+    final inputText = rawLines[i];
     if (r.error != null) failed++;
+    final display = (r.value != null && !r.engineError && dp != null)
+        ? formatValue(r.value!, decimals: dp, format: fmt)
+        : r.display;
 
     if (json) {
       out.writeln(
         jsonEncode({
           'line': i + 1,
-          'input': r.text,
-          'display': r.display,
+          'input': inputText,
+          'display': display,
           'error': r.error,
-          'value': _valueJson(r.value),
-          if (steps && r.display != null && r.error == null)
-            'steps': engine.explain(r.text),
+          'value': valueToJson(r.value),
+          if (steps && display != null && r.error == null)
+            'steps': engine.explain(cleanLines[i]),
         }),
       );
     } else {
-      final answer = r.display ?? '';
-      out.writeln(answer.isEmpty ? r.text : '${r.text}\t$answer');
-      if (steps && r.display != null && r.error == null) {
-        for (final s in engine.explain(r.text)) {
+      final answer = display ?? '';
+      out.writeln(answer.isEmpty ? inputText : '$inputText\t$answer');
+      if (steps && display != null && r.error == null) {
+        for (final s in engine.explain(cleanLines[i])) {
           out.writeln('    $s');
         }
       }
@@ -143,25 +172,6 @@ String _readAll() {
     buf.writeln(line);
   }
   return buf.toString();
-}
-
-Map<String, Object?>? _valueJson(Value? v) {
-  switch (v) {
-    case NumValue(:final value, :final unit):
-      return {'type': 'number', 'value': value, 'unit': unit?.id};
-    case MoneyValue(:final value, :final currency):
-      return {'type': 'money', 'value': value, 'currency': currency};
-    case PercentValue(:final ratio):
-      return {'type': 'percent', 'value': ratio};
-    case DateValue(:final date):
-      return {'type': 'date', 'value': date.toIso8601String()};
-    case BoolValue(:final value):
-      return {'type': 'bool', 'value': value};
-    case ListValue(:final items):
-      return {'type': 'list', 'value': items.map(_valueJson).toList()};
-    case _:
-      return null;
-  }
 }
 
 Never _die(String message) {
