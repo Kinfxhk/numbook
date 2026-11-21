@@ -497,6 +497,9 @@ class Parser {
     'between',
     'tax',
     'total',
+    'subtotal',
+    '小計',
+    '小计',
     'sum',
     'average',
     'prev',
@@ -535,11 +538,12 @@ class Parser {
       String? code;
       if (c.text == r'$') {
         code = 'USD';
+      } else if (c.text == '¥') {
+        code = format.yen;
       } else {
         code = const {
           '€': 'EUR',
           '£': 'GBP',
-          '¥': 'JPY',
           '₩': 'KRW',
           '₹': 'INR',
           '฿': 'THB',

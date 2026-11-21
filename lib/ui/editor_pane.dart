@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/values.dart';
 import '../i18n/strings.dart';
 import 'editor_view.dart';
 import 'feedback.dart';
@@ -239,12 +240,59 @@ class PaneState extends ChangeNotifier {
       return;
     }
 
-    final result = foldDocument(source, folded);
+    final result = foldDocument(source, folded, engine: engine);
     _foldSource = source;
     _foldedLines = folded;
     _lineMap = result.map;
     controller.text = result.visibleLines.join('\n');
     recalc();
+  }
+
+  /// Live grand total across leaf answers when homogeneous (or convertible
+  /// money), null when empty or mixed dimensions.
+  String? get sheetTotalDisplay {
+    final hasLeaf = results.any(
+      (r) =>
+          !r.isSummary &&
+          (r.value is NumValue || r.value is MoneyValue),
+    );
+    if (!hasLeaf) return null;
+    final plain = controller.text
+        .split('\n')
+        .map(Fmt.stripMarkers)
+        .toList(growable: false);
+    final eval = engine.evaluate([...plain, 'grand total']).last;
+    if (eval.value is NumValue || eval.value is MoneyValue) {
+      return eval.display;
+    }
+    return null;
+  }
+
+  /// Live sum across highlighted lines when the selection spans 2+ answered
+  /// numeric/money lines.
+  (int count, String sum)? get selectionSummary {
+    if (!hasSelection) return null;
+    final text = controller.text;
+    final sel = controller.selection;
+    final s0 = sel.start.clamp(0, text.length);
+    final s1 = sel.end.clamp(0, text.length);
+    final firstLine = '\n'.allMatches(text.substring(0, s0)).length;
+    final lastLine = '\n'.allMatches(text.substring(0, s1)).length;
+    if (lastLine <= firstLine) return null;
+    final picked = <String>[];
+    var count = 0;
+    for (var i = firstLine; i <= lastLine && i < results.length; i++) {
+      final r = results[i];
+      if (r.isSummary) continue;
+      if (r.value is NumValue || r.value is MoneyValue) {
+        count++;
+        picked.add(r.display!);
+      }
+    }
+    if (count < 2) return null;
+    final total = engine.evaluate([...picked, 'grand total']).last;
+    if (total.display == null || total.engineError) return null;
+    return (count, total.display!);
   }
 
   /// Each line only sees the names defined above it.
@@ -373,6 +421,7 @@ class EditorPane extends StatelessWidget {
                     showSteps: showSteps,
                     explain: pane.engine.explain,
                     answerWidth: w,
+                    numberFormat: pane.engine.format,
                     explicit: pane.explicitW,
                     scale: 1,
                     wheelBlocked: wheelBlocked,

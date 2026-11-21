@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../i18n/strings.dart';
+import 'feedback.dart';
 import 'theme.dart';
 
 /// One line of the cheat sheet: what you type, and what it answers.
@@ -50,8 +52,12 @@ const cheatSheet = <CheatGroup>[
     CheatRow('0.5 as percentage', '50%'),
     CheatRow('打八折 100', '80'),
     CheatRow('100 打八折', '80'),
+    CheatRow('480 加一', '528'),
+    CheatRow('100 加二成', '120'),
   ]),
   CheatGroup('cheatTotals', [
+    CheatRow('subtotal'),
+    CheatRow('小計'),
     CheatRow('sum'),
     CheatRow('average'),
     CheatRow('count'),
@@ -100,34 +106,64 @@ const cheatSheet = <CheatGroup>[
   ]),
 ];
 
-/// The reference tab in Settings: one scrollable list, no prose to translate
-/// beyond the group titles.
+/// The reference tab in Settings: one scrollable list, tappable to insert or
+/// copy any example directly into the active sheet.
 class CheatSheetView extends StatelessWidget {
   final bool dark;
   final String locale;
+  final ValueChanged<String>? onInsertExample;
 
-  const CheatSheetView({super.key, required this.dark, required this.locale});
+  const CheatSheetView({
+    super.key,
+    required this.dark,
+    required this.locale,
+    this.onInsertExample,
+  });
 
   @override
   Widget build(BuildContext context) {
     final rows = <Widget>[];
-    for (final group in cheatSheet) {
+    for (var gi = 0; gi < cheatSheet.length; gi++) {
+      final group = cheatSheet[gi];
       rows.add(
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 6),
-          child: Text(
-            T.of(locale, group.titleKey),
-            style: TextStyle(
-              fontSize: 11,
-              letterSpacing: 0.6,
-              fontWeight: FontWeight.w600,
-              color: Palette.faint(dark),
-            ),
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 5),
+          child: Row(
+            children: [
+              Text(
+                T.of(locale, group.titleKey),
+                style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 0.6,
+                  fontWeight: FontWeight.w600,
+                  color: Palette.faint(dark),
+                ),
+              ),
+              if (gi == 0) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    T.of(locale, 'cheatTapHint'),
+                    textAlign: TextAlign.right,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: Palette.faint(dark)),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       );
       for (final row in group.rows) {
-        rows.add(_CheatLine(row: row, dark: dark));
+        rows.add(
+          _CheatLine(
+            row: row,
+            dark: dark,
+            locale: locale,
+            onInsert: onInsertExample,
+          ),
+        );
       }
     }
     return ListView(padding: const EdgeInsets.only(bottom: 12), children: rows);
@@ -137,13 +173,40 @@ class CheatSheetView extends StatelessWidget {
 class _CheatLine extends StatelessWidget {
   final CheatRow row;
   final bool dark;
+  final String locale;
+  final ValueChanged<String>? onInsert;
 
-  const _CheatLine({required this.row, required this.dark});
+  const _CheatLine({
+    required this.row,
+    required this.dark,
+    required this.locale,
+    this.onInsert,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 3),
+    return Pressable(
+      onTap: () {
+        Clipboard.setData(ClipboardData(text: row.input));
+        if (onInsert != null) {
+          onInsert!(row.input);
+          Navigator.of(context).maybePop();
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              content: Text('${T.of(locale, 'inserted')}: ${row.input}'),
+              duration: const Duration(milliseconds: 1200),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              content: Text(T.of(locale, 'copied')),
+              duration: const Duration(milliseconds: 1100),
+            ),
+          );
+        }
+      },
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2.5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -22,8 +22,9 @@ void main() {
     await tester.enterText(editor, '9,875+1');
     await tester.pump(const Duration(milliseconds: 80));
 
-    // 9.875 + 1, displayed with EU separators
-    expect(find.textContaining('10,875'), findsWidgets);
+    // 9.875 + 1, displayed and decimal-split with EU separators ('10' + ',875')
+    expect(find.bySemanticsLabel('10,875'), findsOneWidget);
+    expect(find.text(',875'), findsOneWidget);
     expect(find.textContaining('9,876'), findsNothing);
   });
 

@@ -22,7 +22,12 @@ class FoldResult {
 bool isHeading(String line) => line.trimLeft().startsWith('# ');
 
 /// [lines] is the full document; [folded] holds the indices of folded headings.
-FoldResult foldDocument(List<String> lines, Set<int> folded) {
+FoldResult foldDocument(
+  List<String> lines,
+  Set<int> folded, {
+  SheetEngine? engine,
+}) {
+  final evalEngine = engine ?? SheetEngine();
   final visible = <String>[];
   final map = <int>[];
   final foldable = <int>{};
@@ -49,7 +54,7 @@ FoldResult foldDocument(List<String> lines, Set<int> folded) {
 
     if (folded.contains(i) && end > i + 1) {
       final body = lines.sublist(i + 1, end);
-      visible.add(_summary(body, i + 2, end));
+      visible.add(_summary(body, i + 2, end, evalEngine));
       map.add(-1);
     } else {
       for (var k = i + 1; k < end; k++) {
@@ -62,13 +67,17 @@ FoldResult foldDocument(List<String> lines, Set<int> folded) {
   return FoldResult(visible, map, foldable);
 }
 
-String _summary(List<String> body, int firstLine, int lastLine) {
-  final engine = SheetEngine();
+String _summary(
+  List<String> body,
+  int firstLine,
+  int lastLine,
+  SheetEngine engine,
+) {
   final results = engine.evaluate(body);
   final values = results
       .map((r) => r.display)
       .whereType<String>()
-      .where((d) => RegExp(r'^[-+\$€£¥\d]').hasMatch(d))
+      .where((d) => RegExp(r'^[-+\$€£¥₩₹฿\d]|[A-Z]{1,3}\$').hasMatch(d))
       .toList();
   final total = values.isEmpty ? '' : ' · ${_total(body, engine)}';
   final rows = '${body.length} ${body.length == 1 ? 'line' : 'lines'}';

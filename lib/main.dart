@@ -2,20 +2,19 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-
-import 'i18n/strings.dart';
-import 'io/document_io.dart';
-import 'io/file_actions.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data/document.dart';
 import 'data/rates.dart';
 import 'engine/engine.dart';
 import 'engine/values.dart';
+import 'i18n/strings.dart';
+import 'io/document_io.dart';
+import 'io/file_actions.dart';
+import 'ui/command_palette.dart';
 import 'ui/editor_pane.dart';
 import 'ui/feedback.dart';
 import 'ui/formatting.dart';
@@ -40,6 +39,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   final _store = DocumentStore();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _navKey = GlobalKey<NavigatorState>();
+  final _fileBtnKey = GlobalKey();
 
   late PaneState _paneA;
 
@@ -52,39 +52,24 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   bool _routingOwn = false;
 
   bool _dark = false;
-
-  /// 'system' | 'light' | 'dark'. A phone default follows the OS; a desktop
-  /// keeps the light default it always had.
   String _themeMode = 'light';
-
-  /// Settings → haptics: the tick on a key, a fold, a swipe.
   bool _haptics = true;
   bool _sidebarOpen = true;
   bool _answersVisible = true;
   bool _autoRates = true;
   bool _steps = true;
-
-  /// The calculation key row above the keyboard. On by default: a phone IME
-  /// cannot type `+ − × ÷`, which is the whole point of it.
   bool _keyBar = true;
-
-  /// The stored default answer width; each pane keeps its own once dragged.
   double _answerW = 212;
-
-  /// ...and whether that width was set by hand, which lets it exceed the
-  /// comfortable cap without snapping back on the next launch.
   bool _answerWSet = false;
-
-  /// The split's share going to the first pane, dragged by the divider.
   double _splitRatio = 0.5;
   double _uiScale = 1.0;
-  String? _locale; // null = follow the system
+  String? _locale;
   String _numberPreset = 'us';
+  String _yenCode = 'JPY';
   bool _lineNumbers = true;
   bool _showTabs = true;
   final List<String> _tabs = [];
 
-  /// Ctrl/Cmd held: the wheel zooms instead of scrolling.
   final ValueNotifier<bool> _zoomModifier = ValueNotifier(false);
   bool _zoomHud = false;
   bool _savedFlash = false;
@@ -92,10 +77,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   Timer? _zoomHudTimer;
 
   bool get _split => _paneB != null;
-
-  /// The pane that takes a sidebar click, a new sheet and the shortcuts.
   PaneState get _focused => (_focusB && _paneB != null) ? _paneB! : _paneA;
-
   List<PaneState> get _livePanes => [_paneA, ?_paneB];
 
   bool _onKey(KeyEvent e) {
@@ -116,7 +98,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   bool _signColours = true;
-  String _posName = ''; // empty = the built-in paper-and-ink colours
+  String _posName = '';
   String _negName = '';
 
   @override
@@ -136,7 +118,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       answerW: _answerW,
       explicitW: _answerWSet,
     )..addListener(_onPane);
-    // an empty id means "not bound yet": _boot loads the active sheet into it
     pane.load(sheetId);
     return pane;
   }
@@ -147,7 +128,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   SheetEngine _makeEngine() => SheetEngine(
     rates: Rates.current,
-    format: NumberFormat.ofPreset(_numberPreset),
+    format: NumberFormat.ofPreset(_numberPreset, yen: _yenCode),
   );
 
   Future<void> _boot() async {
@@ -155,7 +136,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _themeMode =
         prefs.getString('tallynote.theme') ??
         (defaultTargetPlatform == TargetPlatform.android
-            // a phone follows its own light/dark switch
             ? 'system'
             : ((prefs.getBool('tallynote.dark') ?? false) ? 'dark' : 'light'));
     _haptics = prefs.getBool('tallynote.haptics') ?? true;
@@ -173,6 +153,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _uiScale = prefs.getDouble('tallynote.uiScale') ?? 1.0;
     _locale = prefs.getString('tallynote.locale');
     _numberPreset = prefs.getString('tallynote.numberFormat') ?? 'us';
+    _yenCode = prefs.getString('tallynote.yen') ?? 'JPY';
     _lineNumbers = prefs.getBool('tallynote.lineNumbers') ?? true;
     _showTabs = prefs.getBool('tallynote.showTabs') ?? true;
     _signColours = prefs.getBool('tallynote.signColours') ?? true;
@@ -184,7 +165,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
     await _store.load();
     _store.addListener(_onStore);
-    // the left pane keeps its own sheet, so a restart does not swap the sides
     final first =
         splitOn &&
             splitFirst != splitSheet &&
@@ -202,7 +182,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  /// The first pane shows the active sheet, the second the stored one.
   void _restoreSplit(String stored) {
     final active = _paneA.sheetId;
     if (_store.sheets.length < 2) return;
@@ -222,13 +201,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     if (id != null && !_tabs.contains(id)) _tabs.add(id);
     if (_tabs.length > 8) _tabs.removeAt(0);
     _syncPanes();
-    // a rename, pin or folder move changes nothing else, so refresh the tree
     setState(() {});
   }
 
-  /// Keep one pane per sheet: a pane that lost its sheet falls back to another
-  /// one (the split closes when there is none), and the focused pane follows
-  /// whichever sheet the store was asked to open.
   void _syncPanes() {
     if (_routingOwn) return;
     final ids = _store.sheets.map((s) => s.id).toSet();
@@ -251,7 +226,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           ? active
           : other(_paneB?.sheetId ?? '');
       if (take.isEmpty) {
-        // the other pane holds the only sheet left: no split is possible
         _closeSplit();
         return;
       }
@@ -269,11 +243,9 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     }
   }
 
-  /// A sidebar click, a tab or a pane menu: open [id] in the focused pane.
   void _activate(String id) {
     final b = _paneB;
     if (b != null && id == b.sheetId) {
-      // already in the other pane: move the focus instead of showing it twice
       setState(() => _focusB = true);
     } else {
       if (b != null && id == _paneA.sheetId) setState(() => _focusB = false);
@@ -305,7 +277,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     if (other != null) {
       setState(() => _paneB = _newPane(other.id));
     } else {
-      // one sheet: the split gets a blank one of its own, and the cursor with it
       _routingOwn = true;
       final s = _store.create();
       _routingOwn = false;
@@ -320,14 +291,12 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   void _closeSplit() {
     final b = _paneB;
     if (b == null) return;
-    // the right pane's pending debounce must land before the left pane reads it
     b.flush();
     final active = _store.activeId;
     setState(() {
       _paneB = null;
       _focusB = false;
     });
-    // the pane leaves this frame first: its controller may only die after
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!b.disposed) b.dispose();
     });
@@ -335,8 +304,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     _saveSettings();
   }
 
-  /// True while BACK has an in-app layer to close, outermost first: the
-  /// format bar (a selection), the drawer, the split, then the keyboard.
   bool get _backStacked =>
       _focused.hasSelection ||
       (_scaffoldKey.currentState?.isDrawerOpen ?? false) ||
@@ -357,7 +324,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       return;
     }
     if (_split) {
-      // the focused pane stays: it is the one the user is reading
       _closeSplit();
       return;
     }
@@ -386,18 +352,14 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   @override
   void didChangePlatformBrightness() {
-    // the theme follows the system: repaint without waiting for a tap
     if (mounted) setState(() {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // paused/detached may be the last callback before the process goes away
     if (state != AppLifecycleState.resumed) _flush();
   }
 
-  /// Write every pending debounce now: a kill, a hidden window or a sheet
-  /// switch would otherwise drop it.
   void _flush() {
     for (final p in _livePanes) {
       p.flush();
@@ -405,25 +367,92 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 
   Future<void> _fileMenu() async {
-    // Read the locale from inside LocaleScope: this State's own context sits
-    // above it, so LocaleScope.of(context) silently fell back to English and
-    // the File menu stayed English while the rest of the UI was Chinese.
-    final l = LocaleScope.of(_navKey.currentContext!);
+    final navCtx = _navKey.currentContext!;
+    final l = LocaleScope.of(navCtx);
     String t(String k) => T.of(l, k);
-    final choice = await showMenu<String>(
-      context: _navKey.currentContext!,
-      position: const RelativeRect.fromLTRB(60, 48, 0, 0),
-      items: [
-        PopupMenuItem(value: 'new', child: Text(t('fileNew'))),
-        PopupMenuItem(value: 'open', child: Text(t('fileOpen'))),
-        PopupMenuItem(value: 'copy', child: Text(t('fileSaveCopy'))),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'md', child: Text(t('exportMd'))),
-        PopupMenuItem(value: 'csv', child: Text(t('exportCsv'))),
-        PopupMenuItem(value: 'txt', child: Text(t('exportTxt'))),
-        PopupMenuItem(value: 'print', child: Text(t('filePrint'))),
-      ],
-    );
+    final entries = <(String?, String)>[
+      ('new', t('fileNew')),
+      ('open', t('fileOpen')),
+      ('copy', t('fileSaveCopy')),
+      (null, ''),
+      ('md', t('exportMd')),
+      ('csv', t('exportCsv')),
+      ('txt', t('exportTxt')),
+      ('print', t('filePrint')),
+    ];
+
+    String? choice;
+    if (MediaQuery.sizeOf(navCtx).width < 700) {
+      choice = await showModalBottomSheet<String>(
+        context: navCtx,
+        backgroundColor: Palette.bg(_dark),
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (value, label) in entries)
+                if (value == null)
+                  Divider(height: 8, color: Palette.hairline(_dark))
+                else
+                  Pressable(
+                    onTap: () => Navigator.pop(ctx, value),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Palette.fg(_dark),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      var rect = const RelativeRect.fromLTRB(60, 48, 0, 0);
+      final btnBox = _fileBtnKey.currentContext?.findRenderObject();
+      final overlayBox = Overlay.maybeOf(navCtx)?.context.findRenderObject();
+      if (btnBox is RenderBox && overlayBox is RenderBox) {
+        final topLeft = btnBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+        final bottomRight = btnBox.localToGlobal(
+          btnBox.size.bottomRight(Offset.zero),
+          ancestor: overlayBox,
+        );
+        rect = RelativeRect.fromRect(
+          Rect.fromPoints(
+            Offset(topLeft.dx, bottomRight.dy),
+            Offset(bottomRight.dx, bottomRight.dy),
+          ),
+          Offset.zero & overlayBox.size,
+        );
+      }
+      choice = await showMenu<String>(
+        context: navCtx,
+        position: rect,
+        color: Palette.bg(_dark),
+        items: [
+          for (final (value, label) in entries)
+            if (value == null)
+              const PopupMenuDivider()
+            else
+              PopupMenuItem(value: value, child: Text(label)),
+        ],
+      );
+    }
+    await _runFileChoice(choice);
+  }
+
+  Future<void> _runFileChoice(String? choice) async {
     switch (choice) {
       case 'new':
         _store.create();
@@ -436,6 +465,317 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       case 'print':
         await _print();
     }
+  }
+
+  void _copyToast(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    final navCtx = _navKey.currentContext;
+    if (navCtx == null) return;
+    final l = LocaleScope.of(navCtx);
+    ScaffoldMessenger.maybeOf(navCtx)?.showSnackBar(
+      SnackBar(
+        content: Text(T.of(l, 'copied')),
+        duration: const Duration(milliseconds: 1100),
+      ),
+    );
+  }
+
+  Future<void> _openSettings({int initialTab = 0}) => showSettingsSheet(
+    context: _navKey.currentContext!,
+    dark: _dark,
+    themeMode: _themeMode,
+    answersVisible: _answersVisible,
+    autoRates: _autoRates,
+    steps: _steps,
+    signColours: _signColours,
+    lineNumbers: _lineNumbers,
+    showTabs: _showTabs,
+    uiScale: _uiScale,
+    locale: _locale ?? _effectiveLocale,
+    numberPreset: _numberPreset,
+    yenCode: _yenCode,
+    initialTab: initialTab,
+    onLocale: (v) {
+      setState(() => _locale = v);
+      _saveSettings();
+    },
+    onNumberPreset: (v) {
+      setState(() => _numberPreset = v);
+      for (final p in _livePanes) {
+        p.rebuildEngine();
+      }
+      _saveSettings();
+    },
+    onYenCode: (v) {
+      setState(() => _yenCode = v);
+      for (final p in _livePanes) {
+        p.rebuildEngine();
+      }
+      _saveSettings();
+    },
+    onInsertCheatExample: (example) {
+      final c = _focused.controller;
+      final base = c.text;
+      final sep = base.isEmpty || base.endsWith('\n') ? '' : '\n';
+      final next = '$base$sep$example';
+      c.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+    },
+    posName: _posName,
+    negName: _negName,
+    onAnswers: (v) {
+      setState(() => _answersVisible = v);
+      _saveSettings();
+    },
+    onThemeMode: (v) {
+      setState(() => _themeMode = v);
+      _saveSettings();
+    },
+    haptics: _haptics,
+    onHaptics: (v) {
+      Haptics.on = v;
+      setState(() => _haptics = v);
+      _saveSettings();
+    },
+    onAutoRates: (v) {
+      setState(() => _autoRates = v);
+      _saveSettings();
+    },
+    onSteps: (v) {
+      setState(() => _steps = v);
+      _saveSettings();
+    },
+    keyBar: _keyBar,
+    onKeyBar: (v) {
+      setState(() => _keyBar = v);
+      _saveSettings();
+    },
+    onSignColours: (v) {
+      setState(() => _signColours = v);
+      _saveSettings();
+    },
+    onPosColour: (name) {
+      setState(() => _posName = name);
+      _saveSettings();
+    },
+    onNegColour: (name) {
+      setState(() => _negName = name);
+      _saveSettings();
+    },
+    onLineNumbers: (v) {
+      setState(() => _lineNumbers = v);
+      _saveSettings();
+    },
+    onShowTabs: (v) {
+      setState(() => _showTabs = v);
+      _saveSettings();
+    },
+    onUiScale: (v) {
+      setState(() => _uiScale = v);
+      _saveSettings();
+    },
+    onRefreshRates: () async {
+      final ok = await Rates.refresh();
+      if (!mounted) return false;
+      for (final p in _livePanes) {
+        p.rebuildEngine();
+      }
+      return ok;
+    },
+  );
+
+  Future<void> _openCommandPalette() async {
+    final navCtx = _navKey.currentContext;
+    if (navCtx == null) return;
+    final l = LocaleScope.of(navCtx);
+    String t(String k) => T.of(l, k);
+    final total = _focused.sheetTotalDisplay;
+    final allAnswers = _focused.results
+        .map((r) => r.display)
+        .whereType<String>()
+        .toList();
+
+    final actions = <CommandAction>[
+      CommandAction(
+        id: 'new-sheet',
+        icon: Icons.add,
+        label: t('newSheet'),
+        shortcut: '⌘N',
+        keywords: const ['new', 'create', 'sheet', 'note'],
+        onRun: () => _store.create(),
+      ),
+      if (total != null)
+        CommandAction(
+          id: 'copy-total',
+          icon: Icons.functions,
+          label: '${t('copyGrandTotal')} ($total)',
+          keywords: const ['total', 'sum', 'copy', 'grand'],
+          onRun: () => _copyToast(total),
+        ),
+      if (allAnswers.isNotEmpty)
+        CommandAction(
+          id: 'copy-answers',
+          icon: Icons.content_copy,
+          label: t('copyAllAnswers'),
+          keywords: const ['copy', 'answers', 'results'],
+          onRun: () => _copyToast(allAnswers.join('\n')),
+        ),
+      CommandAction(
+        id: 'toggle-split',
+        icon: Icons.vertical_split,
+        label: _split ? t('unsplit') : t('split'),
+        shortcut: '⌘⇧\\',
+        keywords: const ['split', 'dual', 'pane', 'side'],
+        onRun: _toggleSplit,
+      ),
+      CommandAction(
+        id: 'toggle-sidebar',
+        icon: Icons.view_sidebar_outlined,
+        label: t('sidebar'),
+        shortcut: '⌘\\',
+        keywords: const ['sidebar', 'folders', 'drawer'],
+        onRun: _toggleSidebar,
+      ),
+      CommandAction(
+        id: 'toggle-answers',
+        icon: Icons.visibility_outlined,
+        label: t('answers'),
+        shortcut: '⌘⇧A',
+        keywords: const ['answers', 'hide', 'show', 'column'],
+        onRun: () {
+          setState(() => _answersVisible = !_answersVisible);
+          _saveSettings();
+        },
+      ),
+      CommandAction(
+        id: 'toggle-theme',
+        icon: _dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+        label: '${t('theme')}: ${_dark ? t('light') : t('dark')}',
+        keywords: const ['dark', 'light', 'theme', 'mode'],
+        onRun: () {
+          setState(() => _themeMode = _dark ? 'light' : 'dark');
+          _saveSettings();
+        },
+      ),
+      CommandAction(
+        id: 'toggle-numformat',
+        icon: Icons.pin_outlined,
+        label:
+            '${t('switchNumberFormat')} (${_numberPreset.toUpperCase()} → ${_numberPreset == 'us' ? 'EU' : 'US'})',
+        keywords: const ['number', 'format', 'eu', 'us', 'comma', 'decimal'],
+        onRun: () {
+          setState(
+            () => _numberPreset = _numberPreset == 'us' ? 'eu' : 'us',
+          );
+          for (final p in _livePanes) {
+            p.rebuildEngine();
+          }
+          _saveSettings();
+        },
+      ),
+      CommandAction(
+        id: 'export-md',
+        icon: Icons.file_download_outlined,
+        label: t('exportMd'),
+        keywords: const ['export', 'markdown', 'md'],
+        onRun: () => _exportAs('md'),
+      ),
+      CommandAction(
+        id: 'export-csv',
+        icon: Icons.table_chart_outlined,
+        label: t('exportCsv'),
+        keywords: const ['export', 'csv', 'excel', 'spreadsheet'],
+        onRun: () => _exportAs('csv'),
+      ),
+      CommandAction(
+        id: 'save-copy',
+        icon: Icons.save_alt,
+        label: t('fileSaveCopy'),
+        shortcut: '⌘⇧D',
+        keywords: const ['backup', 'save', 'json', 'copy'],
+        onRun: _saveCopy,
+      ),
+      CommandAction(
+        id: 'print',
+        icon: Icons.print_outlined,
+        label: t('filePrint'),
+        keywords: const ['print', 'pdf'],
+        onRun: _print,
+      ),
+      CommandAction(
+        id: 'cheat-sheet',
+        icon: Icons.menu_book_outlined,
+        label: t('cheatSheet'),
+        keywords: const ['help', 'cheat', 'syntax', 'examples', 'reference'],
+        onRun: () => _openSettings(initialTab: 3),
+      ),
+      CommandAction(
+        id: 'settings',
+        icon: Icons.tune,
+        label: t('settings'),
+        keywords: const ['settings', 'preferences', 'language'],
+        onRun: _openSettings,
+      ),
+    ];
+
+    await showCommandPalette(
+      context: navCtx,
+      dark: _dark,
+      locale: l,
+      actions: actions,
+      sheets: _store.sheets,
+      activeSheetId: _focused.sheetId,
+      folderNameOf: (s) => _store.folderOf(s)?.name,
+      onSelectSheet: _activate,
+    );
+  }
+
+  Future<void> _renameActiveSheet() async {
+    final navCtx = _navKey.currentContext;
+    final s = _focused.sheet;
+    if (navCtx == null || s == null) return;
+    final locale = LocaleScope.of(navCtx);
+    final c = TextEditingController(
+      text: s.title.isEmpty ? T.of(locale, 'untitled') : s.title,
+    );
+    final res = await showDialog<String>(
+      context: navCtx,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Palette.bg(_dark),
+        title: Text(
+          T.of(locale, 'renameSheet'),
+          style: TextStyle(fontSize: 15, color: Palette.fg(_dark)),
+        ),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          style: TextStyle(color: Palette.fg(_dark)),
+          decoration: InputDecoration(hintText: T.of(locale, 'name')),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              T.of(locale, 'cancel'),
+              style: TextStyle(color: Palette.faint(_dark)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: Text(
+              T.of(locale, 'ok'),
+              style: TextStyle(color: Palette.answer(_dark)),
+            ),
+          ),
+        ],
+      ),
+    );
+    c.dispose();
+    final trimmed = (res ?? '').trim();
+    if (trimmed.isNotEmpty) _store.rename(s.id, trimmed);
   }
 
   // ---- file verbs ---------------------------------------------------------
@@ -513,7 +853,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     }
   }
 
-  /// Ctrl/Cmd+S: write now instead of waiting for the debounce.
   void _saveNow() {
     for (final p in _livePanes) {
       p.saveNow();
@@ -535,7 +874,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
-    // last chance: a pending debounce must land before the frame goes away
     _store.removeListener(_onStore);
     for (final p in _livePanes) {
       p.dispose();
@@ -562,6 +900,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     await prefs.setDouble('tallynote.uiScale', _uiScale);
     if (_locale != null) await prefs.setString('tallynote.locale', _locale!);
     await prefs.setString('tallynote.numberFormat', _numberPreset);
+    await prefs.setString('tallynote.yen', _yenCode);
     await prefs.setBool('tallynote.lineNumbers', _lineNumbers);
     await prefs.setBool('tallynote.showTabs', _showTabs);
     await prefs.setBool('tallynote.signColours', _signColours);
@@ -605,11 +944,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   void _format(String open, String close) => _focused.format(open, close);
 
-  /// Split off: today's single editor. Split on: the two panes side by side
-  /// when each one still gets the 340px a pane needs, stacked when it does not
-  /// (a phone, or a tablet with the sidebar open).
-  ///
-  /// [width] is the editor area, not the window: the sidebar takes 250px of it.
   Widget _panesView(double width) {
     final b = _paneB;
     if (b == null) {
@@ -622,12 +956,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       showTitle: true,
       onUnsplit: _closeSplit,
     );
-    final each = (width - _SplitDivider.hit) / 2; // one pane, less the handle
+    final each = (width - _SplitDivider.hit) / 2;
     final side = width >= 1000 || (width >= 700 && each >= 340);
 
     return LayoutBuilder(
       builder: (context, box) {
-        // the drag's unit is the area the two panes share, not the pointer
         final total = (side ? box.maxWidth : box.maxHeight) - _SplitDivider.hit;
         final first = (total * _splitRatio).clamp(0.0, total);
         final handle = _SplitDivider(
@@ -667,7 +1000,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     );
   }
 
-  /// Long-pressing the divider: the two panes trade places, cursor and all.
   void _swapPanes() {
     final b = _paneB;
     if (b == null) return;
@@ -710,11 +1042,7 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // one place decides the brightness: a system change rebuilds this, and
-    // nothing else may read a stale _dark
     _dark = switch (_themeMode) {
-      // the dispatcher, not MediaQuery: this build sits above the app's own
-      // MediaQuery and the observer below re-runs it when the phone flips
       'system' =>
         WidgetsBinding.instance.platformDispatcher.platformBrightness ==
             Brightness.dark,
@@ -723,21 +1051,18 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
     };
     for (final p in _livePanes) {
       p.controller.dark = _dark;
-      // each line only sees the names defined above it
       p.applyLabels();
     }
     final wide = MediaQuery.sizeOf(context).width >= 720;
     final media = MediaQuery.of(context);
     final tabsRow = _showTabs && _tabs.length > 1;
-    // the key row plus a soft keyboard must never squeeze the editor under
-    // 120dp: in landscape they would, so the row is the one that gives way
     final editorRoom =
         media.size.height -
         media.padding.top -
         media.padding.bottom -
         media.viewInsets.bottom -
-        46 - // header
-        26 - // status bar
+        46 -
+        26 -
         (tabsRow ? 30 : 0);
     final showKeyBar =
         _keyBar && (media.viewInsets.bottom == 0 || editorRoom - 44 >= 120);
@@ -750,6 +1075,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
       searchFocus: _searchFocus,
       onClose: wide ? _toggleSidebar : () => Navigator.of(context).maybePop(),
     );
+
+    final activeSheet = _focused.sheet;
+    final activeTitle = activeSheet == null || activeSheet.title.isEmpty
+        ? T.of(_effectiveLocale, 'untitled')
+        : activeSheet.title;
 
     return MaterialApp(
       title: 'Numbook',
@@ -775,9 +1105,6 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
         }
         final mq = MediaQuery.of(context);
         final logical = mq.size / s;
-        // OverflowBox pins the child to the reduced logical size; the transform
-        // then paints it back to exactly one screen, so nothing spills out and
-        // no gap is left behind.
         return LocaleScope(
           locale: _effectiveLocale,
           child: ColoredBox(
@@ -820,318 +1147,244 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
           if (!didPop) _back();
         },
         child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
-              _zoom(1.25),
-          const SingleActivator(LogicalKeyboardKey.equal, control: true): () =>
-              _zoom(1.25),
-          const SingleActivator(LogicalKeyboardKey.minus, meta: true): () =>
-              _zoom(0.8),
-          const SingleActivator(LogicalKeyboardKey.minus, control: true): () =>
-              _zoom(0.8),
-          const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () {
-            setState(() => _uiScale = 1.0);
-            _saveSettings();
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.keyK, meta: true):
+                _openCommandPalette,
+            const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+                _openCommandPalette,
+            const SingleActivator(LogicalKeyboardKey.equal, meta: true): () =>
+                _zoom(1.25),
+            const SingleActivator(LogicalKeyboardKey.equal, control: true):
+                () => _zoom(1.25),
+            const SingleActivator(LogicalKeyboardKey.minus, meta: true): () =>
+                _zoom(0.8),
+            const SingleActivator(LogicalKeyboardKey.minus, control: true):
+                () => _zoom(0.8),
+            const SingleActivator(LogicalKeyboardKey.digit0, meta: true): () {
+              setState(() => _uiScale = 1.0);
+              _saveSettings();
+            },
+            const SingleActivator(LogicalKeyboardKey.digit0, control: true):
+                () {
+                  setState(() => _uiScale = 1.0);
+                  _saveSettings();
+                },
+            const SingleActivator(LogicalKeyboardKey.keyS, meta: true):
+                _saveNow,
+            const SingleActivator(LogicalKeyboardKey.keyS, control: true):
+                _saveNow,
+            const SingleActivator(
+              LogicalKeyboardKey.keyD,
+              meta: true,
+              shift: true,
+            ): () {
+              final id = _store.activeId;
+              if (id != null) _store.duplicate(id);
+            },
+            const SingleActivator(
+              LogicalKeyboardKey.keyD,
+              control: true,
+              shift: true,
+            ): () {
+              final id = _store.activeId;
+              if (id != null) _store.duplicate(id);
+            },
+            const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
+                _format('**', '**'),
+            const SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
+                _format('**', '**'),
+            const SingleActivator(LogicalKeyboardKey.keyI, meta: true): () =>
+                _format('_', '_'),
+            const SingleActivator(LogicalKeyboardKey.keyI, control: true): () =>
+                _format('_', '_'),
+            const SingleActivator(LogicalKeyboardKey.keyU, meta: true): () =>
+                _format('__', '__'),
+            const SingleActivator(LogicalKeyboardKey.keyU, control: true): () =>
+                _format('__', '__'),
+            const SingleActivator(
+              LogicalKeyboardKey.keyS,
+              meta: true,
+              shift: true,
+            ): () => _format('~~', '~~'),
+            const SingleActivator(
+              LogicalKeyboardKey.keyS,
+              control: true,
+              shift: true,
+            ): () => _format('~~', '~~'),
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                _focusSearch,
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                _focusSearch,
+            const SingleActivator(LogicalKeyboardKey.keyW, meta: true): () {
+              final id = _store.activeId;
+              if (id != null) _closeTab(id);
+            },
+            const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
+              final id = _store.activeId;
+              if (id != null) _closeTab(id);
+            },
+            const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () =>
+                _store.create(),
+            const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
+                _store.create(),
+            const SingleActivator(LogicalKeyboardKey.backslash, meta: true):
+                _toggleSidebar,
+            const SingleActivator(LogicalKeyboardKey.backslash, control: true):
+                _toggleSidebar,
+            const SingleActivator(
+              LogicalKeyboardKey.backslash,
+              meta: true,
+              shift: true,
+            ): _toggleSplit,
+            const SingleActivator(
+              LogicalKeyboardKey.backslash,
+              control: true,
+              shift: true,
+            ): _toggleSplit,
+            const SingleActivator(
+              LogicalKeyboardKey.keyA,
+              meta: true,
+              shift: true,
+            ): () {
+              setState(() => _answersVisible = !_answersVisible);
+              _saveSettings();
+            },
+            const SingleActivator(
+              LogicalKeyboardKey.keyA,
+              control: true,
+              shift: true,
+            ): () {
+              setState(() => _answersVisible = !_answersVisible);
+              _saveSettings();
+            },
           },
-          const SingleActivator(LogicalKeyboardKey.digit0, control: true): () {
-            setState(() => _uiScale = 1.0);
-            _saveSettings();
-          },
-          const SingleActivator(LogicalKeyboardKey.keyS, meta: true): _saveNow,
-          const SingleActivator(LogicalKeyboardKey.keyS, control: true):
-              _saveNow,
-          const SingleActivator(
-            LogicalKeyboardKey.keyD,
-            meta: true,
-            shift: true,
-          ): () {
-            final id = _store.activeId;
-            if (id != null) _store.duplicate(id);
-          },
-          const SingleActivator(
-            LogicalKeyboardKey.keyD,
-            control: true,
-            shift: true,
-          ): () {
-            final id = _store.activeId;
-            if (id != null) _store.duplicate(id);
-          },
-          // rich-text shortcuts, the same keys as Word / Google Docs
-          const SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
-              _format('**', '**'),
-          const SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
-              _format('**', '**'),
-          const SingleActivator(LogicalKeyboardKey.keyI, meta: true): () =>
-              _format('_', '_'),
-          const SingleActivator(LogicalKeyboardKey.keyI, control: true): () =>
-              _format('_', '_'),
-          const SingleActivator(LogicalKeyboardKey.keyU, meta: true): () =>
-              _format('__', '__'),
-          const SingleActivator(LogicalKeyboardKey.keyU, control: true): () =>
-              _format('__', '__'),
-          const SingleActivator(
-            LogicalKeyboardKey.keyS,
-            meta: true,
-            shift: true,
-          ): () =>
-              _format('~~', '~~'),
-          const SingleActivator(
-            LogicalKeyboardKey.keyS,
-            control: true,
-            shift: true,
-          ): () =>
-              _format('~~', '~~'),
-          const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-              _focusSearch,
-          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-              _focusSearch,
-          const SingleActivator(LogicalKeyboardKey.keyW, meta: true): () {
-            final id = _store.activeId;
-            if (id != null) _closeTab(id);
-          },
-          const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
-            final id = _store.activeId;
-            if (id != null) _closeTab(id);
-          },
-          const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () =>
-              _store.create(),
-          const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
-              _store.create(),
-          const SingleActivator(LogicalKeyboardKey.backslash, meta: true):
-              _toggleSidebar,
-          const SingleActivator(LogicalKeyboardKey.backslash, control: true):
-              _toggleSidebar,
-          const SingleActivator(
-            LogicalKeyboardKey.backslash,
-            meta: true,
-            shift: true,
-          ): _toggleSplit,
-          const SingleActivator(
-            LogicalKeyboardKey.backslash,
-            control: true,
-            shift: true,
-          ): _toggleSplit,
-          const SingleActivator(
-            LogicalKeyboardKey.keyA,
-            meta: true,
-            shift: true,
-          ): () {
-            setState(() => _answersVisible = !_answersVisible);
-            _saveSettings();
-          },
-          const SingleActivator(
-            LogicalKeyboardKey.keyA,
-            control: true,
-            shift: true,
-          ): () {
-            setState(() => _answersVisible = !_answersVisible);
-            _saveSettings();
-          },
-        },
-        child: Focus(
-          autofocus: true,
-          child: Listener(
-            onPointerSignal: _onPointerSignal,
-            child: Scaffold(
-              key: _scaffoldKey,
-              drawer: wide ? null : Drawer(child: SafeArea(child: sidebar)),
-              body: SafeArea(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (wide && _sidebarOpen) ...[
-                      sidebar,
-                      VerticalDivider(width: 1, color: Palette.hairline(_dark)),
-                    ],
-                    Expanded(
-                      child: Column(
-                        children: [
-                          _Header(
-                            dark: _dark,
-                            sidebarOpen: _sidebarOpen && wide,
-                            showMenu: !(wide && _sidebarOpen),
-                            split: _split,
-                            onSplit: _toggleSplit,
-                            onMenu: wide
-                                ? _toggleSidebar
-                                : () => _scaffoldKey.currentState?.openDrawer(),
-                            onFile: _fileMenu,
-                            onSettings: () => showSettingsSheet(
-                              context: _navKey.currentContext!,
+          child: Focus(
+            autofocus: true,
+            child: Listener(
+              onPointerSignal: _onPointerSignal,
+              child: Scaffold(
+                key: _scaffoldKey,
+                drawer: wide ? null : Drawer(child: SafeArea(child: sidebar)),
+                body: SafeArea(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (wide && _sidebarOpen) ...[
+                        sidebar,
+                        VerticalDivider(
+                          width: 1,
+                          color: Palette.hairline(_dark),
+                        ),
+                      ],
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _Header(
                               dark: _dark,
-                              themeMode: _themeMode,
-                              answersVisible: _answersVisible,
-                              autoRates: _autoRates,
-                              steps: _steps,
-                              signColours: _signColours,
-                              lineNumbers: _lineNumbers,
-                              showTabs: _showTabs,
-                              uiScale: _uiScale,
-                              locale: _locale ?? _effectiveLocale,
-                              numberPreset: _numberPreset,
-                              onLocale: (v) {
-                                setState(() => _locale = v);
-                                _saveSettings();
-                              },
-                              onNumberPreset: (v) {
-                                setState(() => _numberPreset = v);
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                _saveSettings();
-                              },
-                              posName: _posName,
-                              negName: _negName,
-                              onAnswers: (v) {
-                                setState(() => _answersVisible = v);
-                                _saveSettings();
-                              },
-                              onThemeMode: (v) {
-                                setState(() => _themeMode = v);
-                                _saveSettings();
-                              },
-                              haptics: _haptics,
-                              onHaptics: (v) {
-                                Haptics.on = v;
-                                setState(() => _haptics = v);
-                                _saveSettings();
-                              },
-                              onAutoRates: (v) {
-                                setState(() => _autoRates = v);
-                                _saveSettings();
-                              },
-                              onSteps: (v) {
-                                setState(() => _steps = v);
-                                _saveSettings();
-                              },
-                              keyBar: _keyBar,
-                              onKeyBar: (v) {
-                                setState(() => _keyBar = v);
-                                _saveSettings();
-                              },
-                              onSignColours: (v) {
-                                setState(() => _signColours = v);
-                                _saveSettings();
-                              },
-                              onPosColour: (name) {
-                                setState(() => _posName = name);
-                                _saveSettings();
-                              },
-                              onNegColour: (name) {
-                                setState(() => _negName = name);
-                                _saveSettings();
-                              },
-                              onLineNumbers: (v) {
-                                setState(() => _lineNumbers = v);
-                                _saveSettings();
-                              },
-                              onShowTabs: (v) {
-                                setState(() => _showTabs = v);
-                                _saveSettings();
-                              },
-                              onUiScale: (v) {
-                                setState(() => _uiScale = v);
-                                _saveSettings();
-                              },
-                              onRefreshRates: () async {
-                                final ok = await Rates.refresh();
-                                if (!mounted) return false;
-                                for (final p in _livePanes) {
-                                  p.rebuildEngine();
-                                }
-                                return ok;
-                              },
+                              sidebarOpen: _sidebarOpen && wide,
+                              showMenu: !(wide && _sidebarOpen),
+                              split: _split,
+                              activeTitle: !(wide && _sidebarOpen) && !_split
+                                  ? activeTitle
+                                  : null,
+                              fileBtnKey: _fileBtnKey,
+                              onRenameTitle: _renameActiveSheet,
+                              onCommandPalette: _openCommandPalette,
+                              onSplit: _toggleSplit,
+                              onMenu: wide
+                                  ? _toggleSidebar
+                                  : () =>
+                                        _scaffoldKey.currentState?.openDrawer(),
+                              onFile: _fileMenu,
+                              onSettings: _openSettings,
                             ),
-                          ),
-                          Divider(height: 1, color: Palette.hairline(_dark)),
-                          if (tabsRow)
-                            _TabBar(
-                              dark: _dark,
-                              tabs: _tabs,
-                              activeId: _store.activeId,
-                              titleOf: (id) {
-                                final s = _store.sheets
-                                    .where((x) => x.id == id)
-                                    .firstOrNull;
-                                final navCtx = _navKey.currentContext;
-                                final locale = navCtx == null
-                                    ? LocaleScope.of(context)
-                                    : LocaleScope.of(navCtx);
-                                return s == null || s.title.isEmpty
-                                    ? T.of(locale, 'untitled')
-                                    : s.title;
-                              },
-                              onSelect: _store.select,
-                              onClose: _closeTab,
-                            ),
-                          Expanded(
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  // the split's breakpoint is about the room
-                                  // the editor has, so measure that, not the
-                                  // window: the sidebar eats 250px of it
-                                  child: LayoutBuilder(
-                                    builder: (context, box) =>
-                                        _panesView(box.maxWidth),
-                                  ),
-                                ),
-                                if (_zoomHud)
-                                  Positioned(
-                                    right: 18,
-                                    bottom: 18,
-                                    child: _ZoomHud(
-                                      dark: _dark,
-                                      scale: _uiScale,
-                                      onMinus: () => _zoom(1 / 1.1),
-                                      onPlus: () => _zoom(1.1),
-                                      onReset: () => _setScale(1.0),
+                            Divider(height: 1, color: Palette.hairline(_dark)),
+                            if (tabsRow)
+                              _TabBar(
+                                dark: _dark,
+                                tabs: _tabs,
+                                activeId: _store.activeId,
+                                titleOf: (id) {
+                                  final s = _store.sheets
+                                      .where((x) => x.id == id)
+                                      .firstOrNull;
+                                  final navCtx = _navKey.currentContext;
+                                  final locale = navCtx == null
+                                      ? LocaleScope.of(context)
+                                      : LocaleScope.of(navCtx);
+                                  return s == null || s.title.isEmpty
+                                      ? T.of(locale, 'untitled')
+                                      : s.title;
+                                },
+                                onSelect: _store.select,
+                                onClose: _closeTab,
+                              ),
+                            Expanded(
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: LayoutBuilder(
+                                      builder: (context, box) =>
+                                          _panesView(box.maxWidth),
                                     ),
                                   ),
-                                if (_focused.hasSelection)
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 14,
-                                    child: Center(
-                                      child: _FormatBar(
+                                  if (_zoomHud)
+                                    Positioned(
+                                      right: 18,
+                                      bottom: 18,
+                                      child: _ZoomHud(
                                         dark: _dark,
-                                        onFormat: _format,
+                                        scale: _uiScale,
+                                        onMinus: () => _zoom(1 / 1.1),
+                                        onPlus: () => _zoom(1.1),
+                                        onReset: () => _setScale(1.0),
                                       ),
                                     ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          _StatusBar(
-                            dark: _dark,
-                            dirty: _focused.dirty,
-                            justSaved: _savedFlash,
-                            saveFailed: _store.saveFailed,
-                            savedAt: _focused.lastSaved,
-                            lines: _focused.controller.text.split('\n').length,
-                            answers: _focused.results
-                                .where((r) => r.display != null)
-                                .length,
-                            onSave: _saveNow,
-                          ),
-                          // only with a soft keyboard up: a desktop never
-                          // sees this row
-                          if (showKeyBar && _focused.focus.hasFocus)
-                            _KeyboardSlot(
-                              child: KeyBar(
-                                controller: _focused.controller,
-                                dark: _dark,
+                                  if (_focused.hasSelection)
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: 14,
+                                      child: Center(
+                                        child: _FormatBar(
+                                          dark: _dark,
+                                          onFormat: _format,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                        ],
+                            _StatusBar(
+                              dark: _dark,
+                              dirty: _focused.dirty,
+                              justSaved: _savedFlash,
+                              saveFailed: _store.saveFailed,
+                              savedAt: _focused.lastSaved,
+                              lines:
+                                  _focused.controller.text.split('\n').length,
+                              answers: _focused.results
+                                  .where((r) => r.display != null)
+                                  .length,
+                              selectionSummary: _focused.selectionSummary,
+                              onCopyValue: _copyToast,
+                              onSave: _saveNow,
+                            ),
+                            if (showKeyBar && _focused.focus.hasFocus)
+                              _KeyboardSlot(
+                                child: KeyBar(
+                                  controller: _focused.controller,
+                                  dark: _dark,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
           ),
         ),
       ),
@@ -1139,16 +1392,11 @@ class _AppState extends State<TallynoteApp> with WidgetsBindingObserver {
   }
 }
 
-/// The rule between the two panes: drag to set the share of the area they
-/// split, double-tap back to 50/50, long-press to trade places. Fifteen
-/// device pixels of finger, with the app's hairline still one pixel wide.
+
 class _SplitDivider extends StatelessWidget {
-  /// The whole target, in either direction.
   static const hit = 15.0;
 
   final bool dark;
-
-  /// True while the panes are stacked: the drag is vertical.
   final bool vertical;
   final ValueChanged<double> onDrag;
   final VoidCallback onDragEnd;
@@ -1198,8 +1446,6 @@ class _SplitDivider extends StatelessWidget {
   }
 }
 
-/// Shows [child] only while a soft keyboard is up. Scaffold removes the inset
-/// from its body's MediaQuery, so this watches the view instead.
 class _KeyboardSlot extends StatefulWidget {
   final Widget child;
 
@@ -1235,12 +1481,13 @@ class _KeyboardSlotState extends State<_KeyboardSlot>
 class _Header extends StatelessWidget {
   final bool dark;
   final bool sidebarOpen;
-
-  /// The sidebar carries its own collapse control, so the header only shows a
-  /// menu button when the sidebar is actually hidden.
   final bool showMenu;
   final bool split;
+  final String? activeTitle;
+  final Key? fileBtnKey;
   final VoidCallback onMenu;
+  final VoidCallback onRenameTitle;
+  final VoidCallback onCommandPalette;
   final VoidCallback onSplit;
   final VoidCallback onFile;
   final VoidCallback onSettings;
@@ -1251,9 +1498,13 @@ class _Header extends StatelessWidget {
     required this.showMenu,
     required this.split,
     required this.onMenu,
+    required this.onRenameTitle,
+    required this.onCommandPalette,
     required this.onSplit,
     required this.onFile,
     required this.onSettings,
+    this.activeTitle,
+    this.fileBtnKey,
   });
 
   @override
@@ -1271,8 +1522,38 @@ class _Header extends StatelessWidget {
                 onPressed: onMenu,
                 icon: Icon(Icons.menu, color: Palette.faint(dark)),
               ),
-            const Spacer(),
+            if (activeTitle != null)
+              Expanded(
+                child: Pressable(
+                  onTap: onRenameTitle,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 6,
+                  ),
+                  child: Text(
+                    activeTitle!,
+                    key: const ValueKey('header-sheet-title'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Palette.fg(dark).withValues(alpha: 0.85),
+                    ),
+                  ),
+                ),
+              )
+            else
+              const Spacer(),
             _IconAction(
+              key: const ValueKey('header-command-palette'),
+              icon: Icons.terminal,
+              tooltip: '${LocaleScope.t(context, 'commandPalette')}  ⌘K',
+              dark: dark,
+              onTap: onCommandPalette,
+            ),
+            _IconAction(
+              key: fileBtnKey,
               icon: Icons.folder_open_outlined,
               tooltip: LocaleScope.t(context, 'file'),
               dark: dark,
@@ -1302,12 +1583,11 @@ class _IconAction extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final bool dark;
-
-  /// On while the thing it toggles is on.
   final bool active;
   final VoidCallback onTap;
 
   const _IconAction({
+    super.key,
     required this.icon,
     required this.tooltip,
     required this.dark,
@@ -1334,6 +1614,8 @@ class _StatusBar extends StatelessWidget {
   final bool justSaved;
   final bool saveFailed;
   final DateTime? savedAt;
+  final (int count, String sum)? selectionSummary;
+  final ValueChanged<String> onCopyValue;
   final VoidCallback onSave;
 
   const _StatusBar({
@@ -1344,10 +1626,11 @@ class _StatusBar extends StatelessWidget {
     required this.justSaved,
     required this.saveFailed,
     required this.savedAt,
+    required this.onCopyValue,
     required this.onSave,
+    this.selectionSummary,
   });
 
-  /// "editing…" while the debounce is pending, else the last save time.
   String _saveLabelFor(String locale) {
     if (saveFailed) return T.of(locale, 'saveFailed');
     if (dirty) return T.of(locale, 'editing');
@@ -1369,10 +1652,21 @@ class _StatusBar extends StatelessWidget {
           });
   }
 
+  bool _isRateStale() {
+    final d = Rates.updatedDate;
+    if (d == null) return false;
+    final parsed = DateTime.tryParse(d);
+    if (parsed == null) return false;
+    return DateTime.now().difference(parsed).inDays > 7;
+  }
+
   @override
   Widget build(BuildContext context) {
     final locale = LocaleScope.of(context);
     final rateDate = Rates.updatedDate ?? T.of(locale, 'ratesBuiltIn');
+    final stale = _isRateStale();
+    final sel = selectionSummary;
+
     return Container(
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1392,13 +1686,34 @@ class _StatusBar extends StatelessWidget {
               style: TextStyle(fontSize: 11, color: Palette.faint(dark)),
             ),
           ),
+          if (sel != null) ...[
+            const SizedBox(width: 12),
+            Pressable(
+              onTap: () => onCopyValue(sel.$2),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Text(
+                T.format(locale, 'selectionSum', {
+                  'n': '${sel.$1}',
+                  'sum': sel.$2,
+                }),
+                key: const ValueKey('status-selection-sum'),
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: Palette.answer(dark),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(width: 12),
           if (_saveLabelFor(locale).isNotEmpty) ...[
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onSave,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
                   _saveLabelFor(locale),
                   style: TextStyle(
@@ -1411,6 +1726,18 @@ class _StatusBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
+          ],
+          const Spacer(),
+          if (stale) ...[
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Palette.answer(dark).withValues(alpha: 0.75),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 5),
           ],
           Flexible(
             child: Text(
@@ -1445,7 +1772,6 @@ class _FormatBar extends StatelessWidget {
         );
 
     final base = TextStyle(fontSize: 13, fontFamily: monoFamily);
-    // a floating card: showing it must not reflow the text above
     return Container(
       constraints: const BoxConstraints(maxWidth: 360),
       decoration: BoxDecoration(
