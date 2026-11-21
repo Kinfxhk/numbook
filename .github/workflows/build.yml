@@ -14,7 +14,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned on purpose: the project is developed and verified on this
+          # exact Flutter version. `channel: stable` floats, and when it moved
+          # to 3.50.1 the whole repo started failing `flutter analyze` on
+          # deprecation info. Bump this only together with a real upgrade run.
+          flutter-version: '3.47.9'
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
@@ -32,7 +36,11 @@ jobs:
           java-version: '21'
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned on purpose: the project is developed and verified on this
+          # exact Flutter version. `channel: stable` floats, and when it moved
+          # to 3.50.1 the whole repo started failing `flutter analyze` on
+          # deprecation info. Bump this only together with a real upgrade run.
+          flutter-version: '3.47.9'
       - run: flutter pub get
       - name: Write the Android signing key
         env:
@@ -89,7 +97,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned on purpose: the project is developed and verified on this
+          # exact Flutter version. `channel: stable` floats, and when it moved
+          # to 3.50.1 the whole repo started failing `flutter analyze` on
+          # deprecation info. Bump this only together with a real upgrade run.
+          flutter-version: '3.47.9'
       - run: flutter pub get
       - run: flutter build linux --release
       - run: tar -czf tallynote-linux.tar.gz -C build/linux/x64/release bundle
@@ -135,7 +147,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned on purpose: the project is developed and verified on this
+          # exact Flutter version. `channel: stable` floats, and when it moved
+          # to 3.50.1 the whole repo started failing `flutter analyze` on
+          # deprecation info. Bump this only together with a real upgrade run.
+          flutter-version: '3.47.9'
       - run: flutter pub get
       - run: flutter build windows --release
       - name: Ship the VC++ runtime next to the exe
@@ -163,7 +179,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # Pinned on purpose: the project is developed and verified on this
+          # exact Flutter version. `channel: stable` floats, and when it moved
+          # to 3.50.1 the whole repo started failing `flutter analyze` on
+          # deprecation info. Bump this only together with a real upgrade run.
+          flutter-version: '3.47.9'
       - run: flutter pub get
       - run: flutter build web --release --base-href /numbook/ --no-web-resources-cdn
       - name: Include privacy and support pages in every deployment
