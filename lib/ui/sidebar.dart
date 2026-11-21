@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../data/document.dart';
 import '../i18n/strings.dart';
@@ -102,6 +102,24 @@ class _SidebarState extends State<Sidebar> {
                 ),
                 prefixIconConstraints: const BoxConstraints(
                   minWidth: 26,
+                  minHeight: 20,
+                ),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => setState(() {
+                          _search.clear();
+                          _query = '';
+                        }),
+                        child: Icon(
+                          Icons.close,
+                          size: 14,
+                          color: Palette.faint(_dark),
+                        ),
+                      ),
+                suffixIconConstraints: const BoxConstraints(
+                  minWidth: 24,
                   minHeight: 20,
                 ),
                 border: InputBorder.none,
@@ -343,6 +361,11 @@ class _SidebarState extends State<Sidebar> {
               ? (_dark ? const Color(0xFF232426) : const Color(0xFFE7E3DA))
               : Colors.transparent,
           borderRadius: BorderRadius.circular(3),
+          border: selected
+              ? Border(
+                  left: BorderSide(color: Palette.answer(_dark), width: 2),
+                )
+              : null,
         ),
         child: Row(
         children: [

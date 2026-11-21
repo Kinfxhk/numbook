@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'formatting.dart';
-import 'theme.dart';
 
 /// Renders the inline markers (**bold**, _italic_, ~~strike~~, __underline__,
 /// {red}colour{/}) without turning the sheet into a rich-text document.
@@ -26,6 +25,20 @@ class MarkedController extends TextEditingController {
     value = TextEditingValue(
       text: next,
       selection: TextSelection.collapsed(offset: start + s.length),
+    );
+  }
+
+  /// Replaces [prefixLen] characters right before the collapsed caret with
+  /// [replacement], used by inline variable and `#tag` completion.
+  void replacePrefixAtCaret(int prefixLen, String replacement) {
+    final v = value;
+    final caret = (v.selection.isValid ? v.selection.extentOffset : text.length)
+        .clamp(0, text.length);
+    final start = (caret - prefixLen).clamp(0, caret);
+    final next = text.replaceRange(start, caret, replacement);
+    value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: start + replacement.length),
     );
   }
 
@@ -60,26 +73,14 @@ class MarkedController extends TextEditingController {
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
-      if (Fmt.isDraft(line)) {
-        children.add(
-          TextSpan(
-            text: line,
-            style: base.copyWith(
-              color: Palette.faint(dark),
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        );
-      } else {
-        children.addAll(
-          Fmt.withReferences(
-            Fmt.spans(line, base),
-            base,
-            labels: i < labelsByLine.length ? labelsByLine[i] : const {},
-            dark: dark,
-          ),
-        );
-      }
+      children.addAll(
+        Fmt.editorSpans(
+          line,
+          base,
+          labels: i < labelsByLine.length ? labelsByLine[i] : const {},
+          dark: dark,
+        ),
+      );
       if (i < lines.length - 1) children.add(TextSpan(text: '\n', style: base));
     }
 

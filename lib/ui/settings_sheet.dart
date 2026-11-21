@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../data/rates.dart';
 import '../i18n/strings.dart';
@@ -7,8 +7,7 @@ import 'feedback.dart';
 import 'formatting.dart';
 import 'theme.dart';
 
-/// All settings, grouped into tabs. The main screen keeps two buttons, so
-/// everything that is a preference rather than an action ends up here.
+/// All settings, grouped into tabs.
 Future<void> showSettingsSheet({
   required BuildContext context,
   required bool dark,
@@ -26,8 +25,12 @@ Future<void> showSettingsSheet({
   required double uiScale,
   required String locale,
   required String numberPreset,
+  String yenCode = 'JPY',
+  int initialTab = 0,
   required ValueChanged<String> onLocale,
   required ValueChanged<String> onNumberPreset,
+  ValueChanged<String>? onYenCode,
+  ValueChanged<String>? onInsertCheatExample,
   required ValueChanged<bool> onAnswers,
   required ValueChanged<String> onThemeMode,
   required ValueChanged<bool> onHaptics,
@@ -60,7 +63,11 @@ Future<void> showSettingsSheet({
       uiScale: uiScale,
       locale: locale,
       numberPreset: numberPreset,
+      yenCode: yenCode,
+      initialTab: initialTab,
       onNumberPreset: onNumberPreset,
+      onYenCode: onYenCode,
+      onInsertCheatExample: onInsertCheatExample,
       onLocale: onLocale,
       onAnswers: onAnswers,
       onThemeMode: onThemeMode,
@@ -95,8 +102,12 @@ class _SettingsDialog extends StatefulWidget {
   final double uiScale;
   final String locale;
   final String numberPreset;
+  final String yenCode;
+  final int initialTab;
   final ValueChanged<String> onLocale;
   final ValueChanged<String> onNumberPreset;
+  final ValueChanged<String>? onYenCode;
+  final ValueChanged<String>? onInsertCheatExample;
   final ValueChanged<bool> onAnswers;
   final ValueChanged<String> onThemeMode;
   final ValueChanged<bool> onHaptics;
@@ -127,8 +138,12 @@ class _SettingsDialog extends StatefulWidget {
     required this.uiScale,
     required this.locale,
     required this.numberPreset,
+    required this.yenCode,
+    required this.initialTab,
     required this.onLocale,
     required this.onNumberPreset,
+    this.onYenCode,
+    this.onInsertCheatExample,
     required this.onAnswers,
     required this.onThemeMode,
     required this.onHaptics,
@@ -164,6 +179,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late double scale = widget.uiScale;
   late String locale = widget.locale;
   late String preset = widget.numberPreset;
+  late String yen = widget.yenCode;
   String? rateError;
 
   @override
@@ -175,6 +191,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         constraints: const BoxConstraints(maxWidth: 520, maxHeight: 560),
         child: DefaultTabController(
           length: 4,
+          initialIndex: widget.initialTab.clamp(0, 3),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -196,7 +213,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     _appearance(),
                     _editor(),
                     _data(),
-                    CheatSheetView(dark: dark, locale: locale),
+                    CheatSheetView(
+                      dark: dark,
+                      locale: locale,
+                      onInsertExample: widget.onInsertCheatExample,
+                    ),
                   ],
                 ),
               ),
@@ -220,8 +241,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  // ---- tabs ----------------------------------------------------------------
-
   Widget _appearance() => ListView(
     padding: const EdgeInsets.symmetric(vertical: 8),
     children: [
@@ -235,8 +254,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           (v) {
             setState(() {
               themeMode = v;
-              // the dialog's own colours follow, previewing the choice
-              dark = v == 'dark' ||
+              dark =
+                  v == 'dark' ||
                   (v == 'system' &&
                       MediaQuery.platformBrightnessOf(context) ==
                           Brightness.dark);
@@ -284,20 +303,21 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         _scaleButtons(),
       ),
       _row(
-        'Number format',
-        'US 1,234.56 · EU 1.234,56',
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        T.of(locale, 'numberFormat'),
+        T.of(locale, 'numberFormatHint'),
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             for (final p in const ['us', 'eu'])
               TextButton(
+                key: ValueKey('numformat-$p'),
                 onPressed: () {
                   setState(() => preset = p);
                   widget.onNumberPreset(p);
                 },
                 style: TextButton.styleFrom(
-                  minimumSize: const Size(40, 28),
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: const Size(36, 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
                   foregroundColor: preset == p
                       ? Palette.answer(dark)
                       : Palette.faint(dark),
@@ -310,6 +330,36 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   ),
                 ),
               ),
+            if (widget.onYenCode != null) ...[
+              Container(
+                width: 1,
+                height: 12,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: Palette.hairline(dark),
+              ),
+              for (final c in const ['JPY', 'CNY'])
+                TextButton(
+                  key: ValueKey('yen-$c'),
+                  onPressed: () {
+                    setState(() => yen = c);
+                    widget.onYenCode!(c);
+                  },
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(42, 28),
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    foregroundColor: yen == c
+                        ? Palette.answer(dark)
+                        : Palette.faint(dark),
+                  ),
+                  child: Text(
+                    '¥$c',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: yen == c ? FontWeight.w700 : FontWeight.w400,
+                    ),
+                  ),
+                ),
+            ],
           ],
         ),
       ),
@@ -412,8 +462,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     ],
   );
 
-  // ---- rows ----------------------------------------------------------------
-
   Widget _languageRow() => _row(
     T.of(locale, 'language'),
     T.of(locale, 'languageHint'),
@@ -447,8 +495,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     ),
   );
 
-  /// A settings row. A phone cannot hold a five-button control beside its
-  /// label, so under 380dp the control goes underneath instead of overflowing.
   Widget _row(String label, String hint, Widget trailing) {
     final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -503,7 +549,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
       );
 
-  /// A row of short choices, like the language one: the theme has three.
   Widget _threeWay(
     List<String> values,
     String current,
@@ -549,7 +594,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _scaleButtons() {
     const presets = [1.0, 1.25, 1.5, 1.75, 2.0];
-    // a Wrap, so a narrow dialog flows five presets onto a second line
     return Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [

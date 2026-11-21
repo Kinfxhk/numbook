@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/lexer.dart';
 import 'document_io.dart';
 
 /// Platform-facing file verbs. Everything that needs a dialog or a plugin lives
@@ -71,7 +72,7 @@ class FileActions {
     final bold = pw.Font.courierBold();
 
     for (final sheet in sheets) {
-      final lines = sheet.content.split('\n');
+      final lines = sheet.content.split('\n').map(stripInlineMarkers).toList();
       final results = engine.evaluate(lines);
       pdf.addPage(
         pw.MultiPage(

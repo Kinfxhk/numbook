@@ -108,13 +108,25 @@ const Set<String> currencyCodes = {
 class NumberFormat {
   final String decimal;
   final String group;
+  final String yen;
 
-  const NumberFormat({this.decimal = '.', this.group = ','});
+  const NumberFormat({
+    this.decimal = '.',
+    this.group = ',',
+    this.yen = 'JPY',
+  });
 
   static const us = NumberFormat();
   static const eu = NumberFormat(decimal: ',', group: '.');
 
-  static NumberFormat ofPreset(String preset) => preset == 'eu' ? eu : us;
+  NumberFormat withYen(String code) => NumberFormat(
+    decimal: decimal,
+    group: group,
+    yen: code == 'CNY' ? 'CNY' : 'JPY',
+  );
+
+  static NumberFormat ofPreset(String preset, {String yen = 'JPY'}) =>
+      (preset == 'eu' ? eu : us).withYen(yen);
 }
 
 const Map<String, String> currencyAliases = {

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../data/document.dart';
 import '../engine/engine.dart';
+import '../engine/lexer.dart';
 
 /// Everything that turns the in-app library into a portable artefact, and back.
 /// Pure functions only: no plugins, no dialogs, so it is all testable.
@@ -55,6 +56,10 @@ class DocumentIo {
     return ImportResult(sheets, folders);
   }
 
+  /// Single sheet formatted as clean Markdown (`⌘⇧C` quick copy).
+  static String singleSheetMarkdown(Sheet sheet, SheetEngine engine) =>
+      markdown([sheet], engine);
+
   /// Markdown: one section per sheet. Lines that produced an answer become a
   /// two-column line so the result survives outside the app.
   static String markdown(List<Sheet> sheets, SheetEngine engine) {
@@ -62,14 +67,19 @@ class DocumentIo {
     for (final sheet in sheets) {
       out.writeln('# ${sheet.title.isEmpty ? 'Untitled' : sheet.title}');
       out.writeln();
-      final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
-      for (var i = 0; i < lines.length; i++) {
+      final rawLines = sheet.content.split('\n');
+      final cleanLines = rawLines.map(stripInlineMarkers).toList();
+      final results = engine.evaluate(cleanLines);
+      for (var i = 0; i < rawLines.length; i++) {
+        // Remove app-only colour tags `{red}...{/}` while preserving Markdown
+        final mdLine = rawLines[i]
+            .replaceAll('{/}', '')
+            .replaceAll(RegExp(r'\{(?:red|orange|green|blue|grey)\}'), '');
         final answer = results[i].display;
         if (answer == null) {
-          out.writeln(lines[i]);
+          out.writeln(mdLine);
         } else {
-          out.writeln('${lines[i]}  →  $answer');
+          out.writeln('$mdLine  →  $answer');
         }
       }
       out.writeln();
@@ -83,15 +93,16 @@ class DocumentIo {
       ['sheet', 'line', 'input', 'answer', 'error'],
     ];
     for (final sheet in sheets) {
-      final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
-      for (var i = 0; i < lines.length; i++) {
+      final cleanLines =
+          sheet.content.split('\n').map(stripInlineMarkers).toList();
+      final results = engine.evaluate(cleanLines);
+      for (var i = 0; i < cleanLines.length; i++) {
         final r = results[i];
         if (r.display == null && r.error == null) continue;
         rows.add([
           sheet.title.isEmpty ? 'Untitled' : sheet.title,
           '${i + 1}',
-          lines[i],
+          cleanLines[i],
           r.display ?? '',
           r.error ?? '',
         ]);
@@ -107,11 +118,12 @@ class DocumentIo {
     for (final sheet in sheets) {
       out.writeln(sheet.title.isEmpty ? 'Untitled' : sheet.title);
       out.writeln('-' * 40);
-      final lines = sheet.content.split('\n');
-      final results = engine.evaluate(lines);
-      for (var i = 0; i < lines.length; i++) {
+      final cleanLines =
+          sheet.content.split('\n').map(stripInlineMarkers).toList();
+      final results = engine.evaluate(cleanLines);
+      for (var i = 0; i < cleanLines.length; i++) {
         final a = results[i].display;
-        out.writeln(a == null ? lines[i] : '${lines[i]}    $a');
+        out.writeln(a == null ? cleanLines[i] : '${cleanLines[i]}    $a');
       }
       out.writeln();
     }

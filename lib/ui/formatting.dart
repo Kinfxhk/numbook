@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+
+import '../engine/lexer.dart';
 
 /// Lightweight inline formatting.
 ///
@@ -24,24 +26,7 @@ class Fmt {
   };
 
   /// Removes every marker so the engine sees plain arithmetic.
-  static String stripMarkers(String s) {
-    var out = s;
-    for (final m in ['**', '__', '~~']) {
-      out = out.replaceAll(m, '');
-    }
-    out = out.replaceAll('{/}', '');
-    out = out.replaceAllMapped(
-      RegExp(r'\{(' + colours.keys.join('|') + r')\}'),
-      (_) => '',
-    );
-    // single underscores only when they wrap something, so identifiers like
-    // my_var survive
-    out = out.replaceAllMapped(
-      RegExp(r'(^|\s)_([^_]+)_(?=\s|$)'),
-      (m) => '${m[1]}${m[2]}',
-    );
-    return out;
-  }
+  static String stripMarkers(String s) => stripInlineMarkers(s);
 
   /// Turns one line into styled spans. Unmatched markers are shown as text.
   static List<TextSpan> spans(
@@ -194,4 +179,201 @@ class Fmt {
 
   /// Every line that starts with `//` is a draft: nothing is calculated.
   static bool isDraft(String line) => line.trimLeft().startsWith('//');
+
+  /// Renders one editor line while keeping an exact 1:1 character count with
+  /// [line] so EditableText caret/selection offsets never drift or crash.
+  static List<InlineSpan> editorSpans(
+    String line,
+    TextStyle base, {
+    required Set<String> labels,
+    required bool dark,
+  }) {
+    if (line.isEmpty) return [TextSpan(text: '', style: base)];
+    final faintColor = dark ? const Color(0xFF8E8B84) : const Color(0xFF8A8578);
+    final accentColor = dark ? const Color(0xFFE8B75A) : const Color(0xFFA8442B);
+
+    if (isDraft(line)) {
+      return [
+        TextSpan(
+          text: line,
+          style: base.copyWith(
+            color: faintColor,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ];
+    }
+
+    // Section heading: `# Heading`
+    final trimmedLeft = line.trimLeft();
+    if (trimmedLeft.startsWith('# ')) {
+      final hashIdx = line.indexOf('# ');
+      return [
+        if (hashIdx > 0) TextSpan(text: line.substring(0, hashIdx), style: base),
+        TextSpan(
+          text: '# ',
+          style: base.copyWith(color: faintColor.withValues(alpha: 0.7)),
+        ),
+        TextSpan(
+          text: line.substring(hashIdx + 2),
+          style: base.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ];
+    }
+
+    // Folded summary projection row: `  ⋯  3 lines ...`
+    if (trimmedLeft.startsWith('⋯')) {
+      return [
+        TextSpan(
+          text: line,
+          style: base.copyWith(color: faintColor),
+        ),
+      ];
+    }
+
+    // Preserve marker characters in faint ink so EditableText offsets match 1:1
+    final syntaxStyle = base.copyWith(
+      color: faintColor.withValues(alpha: 0.42),
+    );
+    final rawSpans = <TextSpan>[];
+    var activeStyle = base;
+    final buf = StringBuffer();
+    var i = 0;
+
+    void flush() {
+      if (buf.isNotEmpty) {
+        rawSpans.add(TextSpan(text: buf.toString(), style: activeStyle));
+        buf.clear();
+      }
+    }
+
+    while (i < line.length) {
+      final colour = RegExp(r'^\{(' + colours.keys.join('|') + r')\}')
+          .firstMatch(line.substring(i));
+      if (colour != null) {
+        flush();
+        final token = colour[0]!;
+        rawSpans.add(TextSpan(text: token, style: syntaxStyle));
+        activeStyle = activeStyle.copyWith(color: colours[colour[1]]);
+        i += token.length;
+        continue;
+      }
+      if (line.startsWith('{/}', i)) {
+        flush();
+        rawSpans.add(TextSpan(text: '{/}', style: syntaxStyle));
+        activeStyle = base;
+        i += 3;
+        continue;
+      }
+      var matched = false;
+      for (final entry in _openToClose.entries) {
+        final open = entry.key;
+        if (line.startsWith(open, i)) {
+          final close = line.indexOf(entry.value, i + open.length);
+          if (close > i) {
+            flush();
+            final inner = line.substring(i + open.length, close);
+            rawSpans.add(TextSpan(text: open, style: syntaxStyle));
+            rawSpans.add(TextSpan(text: inner, style: _apply(activeStyle, open)));
+            rawSpans.add(TextSpan(text: entry.value, style: syntaxStyle));
+            i = close + entry.value.length;
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (matched) continue;
+      buf.write(line[i]);
+      i++;
+    }
+    flush();
+    if (rawSpans.isEmpty) rawSpans.add(TextSpan(text: line, style: base));
+
+    // Highlight trailing `#tag` and aggregate keywords
+    final withTags = <TextSpan>[];
+    final tagMatch = RegExp(r'(\s)(#[\w\u4e00-\u9fff]+)(\s*)$').firstMatch(line);
+    if (tagMatch != null) {
+      final tagStart = tagMatch.start + tagMatch.group(1)!.length;
+      final tagEnd = tagStart + tagMatch.group(2)!.length;
+      var offset = 0;
+      for (final sp in rawSpans) {
+        final t = sp.text ?? '';
+        final spEnd = offset + t.length;
+        if (spEnd <= tagStart || offset >= tagEnd) {
+          withTags.add(sp);
+        } else {
+          if (tagStart > offset) {
+            withTags.add(
+              TextSpan(
+                text: t.substring(0, tagStart - offset),
+                style: sp.style,
+              ),
+            );
+          }
+          final s0 = (tagStart - offset).clamp(0, t.length);
+          final s1 = (tagEnd - offset).clamp(0, t.length);
+          withTags.add(
+            TextSpan(
+              text: t.substring(s0, s1),
+              style: (sp.style ?? base).copyWith(
+                color: accentColor,
+                backgroundColor: accentColor.withValues(alpha: 0.10),
+              ),
+            ),
+          );
+          if (spEnd > tagEnd) {
+            withTags.add(
+              TextSpan(text: t.substring(tagEnd - offset), style: sp.style),
+            );
+          }
+        }
+        offset = spEnd;
+      }
+    } else {
+      withTags.addAll(rawSpans);
+    }
+
+    // Highlight standalone aggregate lines (`sum`, `subtotal`, `小計`, `合共`)
+    final cleanLower = stripMarkers(line).trim().toLowerCase();
+    const aggSet = {
+      'sum',
+      'subtotal',
+      'total',
+      'average',
+      'avg',
+      'count',
+      'min',
+      'max',
+      'grand total',
+      '合共',
+      '總共',
+      '總計',
+      '總和',
+      '小計',
+      '小计',
+      '合计',
+      '总共',
+      '总计',
+      '总和',
+    };
+    if (aggSet.contains(cleanLower) ||
+        RegExp(r'^(?:total|sum|subtotal)\s+of\s+#').hasMatch(cleanLower)) {
+      return [
+        for (final sp in withTags)
+          TextSpan(
+            text: sp.text,
+            style: (sp.style ?? base).copyWith(fontWeight: FontWeight.w600),
+          ),
+      ];
+    }
+
+    return withReferences(
+      withTags,
+      base,
+      labels: labels.isEmpty && !line.contains('line ')
+          ? const {}
+          : (labels.isEmpty ? const {'__line_only__'} : labels),
+      dark: dark,
+    );
+  }
 }
